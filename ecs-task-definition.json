@@ -1,0 +1,79 @@
+{
+  "family": "transcribe-service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::{AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::{AWS_ACCOUNT_ID}:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "transcribe-container",
+      "image": "{AWS_ACCOUNT_ID}.dkr.ecr.{AWS_REGION}.amazonaws.com/transcribe-service:latest",
+      "essential": true,
+      "portMappings": [],
+      "environment": [
+        {
+          "name": "AWS_REGION",
+          "value": "ap-northeast-1"
+        },
+        {
+          "name": "PYTHONPATH",
+          "value": "/app/src"
+        },
+        {
+          "name": "PYTHONUNBUFFERED",
+          "value": "1"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/aws_access_key_id"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/aws_secret_access_key"
+        },
+        {
+          "name": "SQS_QUEUE_URL",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/sqs_queue_url"
+        },
+        {
+          "name": "TRANSCRIBE_OUTPUT_BUCKET",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/output_bucket"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/s3_bucket_name"
+        },
+        {
+          "name": "ZILLIZ_URI",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/zilliz_uri"
+        },
+        {
+          "name": "ZILLIZ_TOKEN",
+          "valueFrom": "arn:aws:ssm:{AWS_REGION}:{AWS_ACCOUNT_ID}:parameter/transcribe/zilliz_token"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/transcribe-service",
+          "awslogs-region": "{AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import boto3; print('Health check passed')\" || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

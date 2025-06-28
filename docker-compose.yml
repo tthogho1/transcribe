@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  transcribe-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: transcribe-service:latest
+    container_name: transcribe-service
+    environment:
+      # AWS Configuration (can be overridden with actual values)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
+      - TRANSCRIBE_OUTPUT_BUCKET=${TRANSCRIBE_OUTPUT_BUCKET:-audio4output}
+
+      # S3 Configuration
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+
+      # Zilliz Cloud Configuration
+      - ZILLIZ_URI=${ZILLIZ_URI}
+      - ZILLIZ_TOKEN=${ZILLIZ_TOKEN}
+
+      # Python Configuration
+      - PYTHONPATH=/app/src
+      - PYTHONUNBUFFERED=1
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+    # Health check
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import boto3; print('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional: Vector processing service
+  vector-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: transcribe-service:latest
+    container_name: vector-service
+    command: ['python', 'src/conversation_vectorization.py']
+    environment:
+      # Same environment variables as transcribe-service
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - ZILLIZ_URI=${ZILLIZ_URI}
+      - ZILLIZ_TOKEN=${ZILLIZ_TOKEN}
+      - PYTHONPATH=/app/src
+      - PYTHONUNBUFFERED=1
+
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+    restart: unless-stopped
+
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+    # This service depends on having transcription results
+    depends_on:
+      - transcribe-service
+
+# Optional: Create a network for service communication
+networks:
+  default:
+    name: transcribe-network
