@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import List, Dict, Any
 from dataclasses import dataclass
 
-# 必要なライブラリ
+# Required libraries
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType
 import numpy as np
+
+from extract_text_fromS3 import S3JsonTextExtractor
 
 from dotenv import load_dotenv
 
@@ -17,7 +19,7 @@ load_dotenv()
 
 @dataclass
 class ConversationChunk:
-    """会話チャンクのデータクラス"""
+    """Data class for conversation chunks"""
 
     id: str
     text: str
@@ -36,21 +38,21 @@ class ConversationVectorizer:
         embedding_model: str = "sonoisa/sentence-bert-base-ja-mean-tokens-v2",
     ):
         """
-        初期化
+        Initialization
         Args:
-            zilliz_uri: Zilliz CloudのURI
-            zilliz_token: Zilliz Cloudのトークン
-            embedding_model: 使用する埋め込みモデル
+            zilliz_uri: Zilliz Cloud URI
+            zilliz_token: Zilliz Cloud token
+            embedding_model: Embedding model to use
         """
         self.zilliz_uri = zilliz_uri
         self.zilliz_token = zilliz_token
         self.embedding_model = SentenceTransformer(embedding_model)
         self.collection_name = "conversation_chunks"
 
-        # テキスト分割器の初期化
+        # Initialize text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,  # チャンクサイズ
-            chunk_overlap=50,  # オーバーラップ
+            chunk_size=300,  # Chunk size
+            chunk_overlap=50,  # Overlap
             separators=["\n\n", "\n", "。", "！", "？", " ", ""],
         )
 
@@ -58,26 +60,26 @@ class ConversationVectorizer:
         self._setup_collection()
 
     def _connect_to_zilliz(self):
-        """Zilliz Cloudに接続"""
+        """Connect to Zilliz Cloud"""
         try:
             connections.connect(
                 alias="default", uri=self.zilliz_uri, token=self.zilliz_token
             )
-            print("✅ Zilliz Cloudに接続しました")
+            print("✅ Connected to Zilliz Cloud")
         except Exception as e:
-            print(f"❌ Zilliz Cloud接続エラー: {e}")
+            print(f"❌ Zilliz Cloud connection error: {e}")
             raise
 
     def _setup_collection(self):
-        """コレクションの設定"""
-        # フィールドスキーマの定義
+        """Set up collection"""
+        # Define field schema
         fields = [
             FieldSchema(
                 name="id", dtype=DataType.VARCHAR, max_length=100, is_primary=True
             ),
             FieldSchema(
                 name="embedding", dtype=DataType.FLOAT_VECTOR, dim=768
-            ),  # all-MiniLM-L6-v2の次元数
+            ),  # Embedding vector dimension
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="speaker", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="timestamp", dtype=DataType.VARCHAR, max_length=50),
@@ -85,9 +87,9 @@ class ConversationVectorizer:
             FieldSchema(name="original_length", dtype=DataType.INT64),
         ]
 
-        schema = CollectionSchema(fields, "会話チャンクのコレクション")
+        schema = CollectionSchema(fields, "Collection for conversation chunks")
 
-        # コレクションの作成（既存の場合は削除）
+        # Create collection (drop if exists)
         try:
             from pymilvus import utility
 
@@ -95,22 +97,22 @@ class ConversationVectorizer:
                 utility.drop_collection(self.collection_name)
 
             self.collection = Collection(self.collection_name, schema)
-            print(f"✅ コレクション '{self.collection_name}' を作成しました")
+            print(f"✅ Created collection '{self.collection_name}'")
         except Exception as e:
-            print(f"❌ コレクション作成エラー: {e}")
+            print(f"❌ Collection creation error: {e}")
             raise
 
     def parse_monologue(self, text: str) -> List[Dict[str, Any]]:
         """
-        一人語りのテキストを意味のある単位に分析
+        Parse monologue text into meaningful units
         Args:
-            text: 一人語りのテキスト
+            text: Monologue text
         Returns:
-            分割された内容のリスト
+            List of parsed content
         """
         utterances = []
 
-        # 改行で区切られている場合は段落単位で処理
+        # Process by paragraphs if separated by line breaks
         if "\n" in text:
             paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
             for i, paragraph in enumerate(paragraphs):
@@ -123,7 +125,7 @@ class ConversationVectorizer:
                     }
                 )
         else:
-            # 改行がない場合は句点で分割
+            # Split by sentence endings if no line breaks
             sentences = []
             current_sentence = ""
 
@@ -134,7 +136,7 @@ class ConversationVectorizer:
                         sentences.append(current_sentence.strip())
                         current_sentence = ""
 
-            # 最後の文が句点で終わらない場合
+            # Handle last sentence if it doesn't end with punctuation
             if current_sentence.strip():
                 sentences.append(current_sentence.strip())
 
@@ -154,11 +156,11 @@ class ConversationVectorizer:
         self, utterances: List[Dict[str, Any]]
     ) -> List[ConversationChunk]:
         """
-        発話をチャンクに分割
+        Split utterances into chunks
         Args:
-            utterances: 発話のリスト
+            utterances: List of utterances
         Returns:
-            チャンクのリスト
+            List of chunks
         """
         chunks = []
         chunk_id = 0
@@ -166,7 +168,7 @@ class ConversationVectorizer:
         for utterance in utterances:
             content = utterance["content"]
 
-            # 長い発話は分割
+            # Split long utterances
             if len(content) > 300:
                 text_chunks = self.text_splitter.split_text(content)
                 for i, chunk_text in enumerate(text_chunks):
@@ -182,7 +184,7 @@ class ConversationVectorizer:
                     )
                     chunk_id += 1
             else:
-                # 短い発話はそのまま
+                # Keep short utterances as-is
                 chunks.append(
                     ConversationChunk(
                         id=f"chunk_{chunk_id:06d}",
@@ -199,25 +201,25 @@ class ConversationVectorizer:
 
     def generate_embeddings(self, chunks: List[ConversationChunk]) -> List[np.ndarray]:
         """
-        チャンクのベクトル化
+        Vectorize chunks
         Args:
-            chunks: チャンクのリスト
+            chunks: List of chunks
         Returns:
-            埋め込みベクトルのリスト
+            List of embedding vectors
         """
         texts = [chunk.text for chunk in chunks]
         embeddings = self.embedding_model.encode(texts)
-        print(f"✅ {len(chunks)}個のチャンクをベクトル化しました")
+        print(f"✅ Vectorized {len(chunks)} chunks")
         return embeddings
 
     def insert_to_zilliz(
         self, chunks: List[ConversationChunk], embeddings: List[np.ndarray]
     ):
         """
-        Zilliz Cloudにデータを挿入
+        Insert data into Zilliz Cloud
         Args:
-            chunks: チャンクのリスト
-            embeddings: 埋め込みベクトルのリスト
+            chunks: List of chunks
+            embeddings: List of embedding vectors
         """
         data = [
             [chunk.id for chunk in chunks],
@@ -231,9 +233,9 @@ class ConversationVectorizer:
 
         try:
             self.collection.insert(data)
-            print(f"✅ {len(chunks)}個のチャンクをZilliz Cloudに保存しました")
+            print(f"✅ Saved {len(chunks)} chunks to Zilliz Cloud")
 
-            # インデックスの作成
+            # Create index
             index_params = {
                 "metric_type": "IP",  # Inner Product
                 "index_type": "IVF_FLAT",
@@ -241,47 +243,47 @@ class ConversationVectorizer:
             }
             self.collection.create_index("embedding", index_params)
             self.collection.load()
-            print("✅ インデックスを作成し、コレクションをロードしました")
+            print("✅ Created index and loaded collection")
 
         except Exception as e:
-            print(f"❌ データ挿入エラー: {e}")
+            print(f"❌ Data insertion error: {e}")
             raise
 
     def process_monologue(self, text: str):
         """
-        一人語りテキストの全体処理
+        Complete processing of monologue text
         Args:
-            text: 一人語りのテキスト
+            text: Monologue text
         """
-        print("🔄 一人語りテキストの処理を開始...")
+        print("🔄 Starting monologue text processing...")
 
-        # 1. テキストの解析
+        # 1. Parse text
         utterances = self.parse_monologue(text)
-        print(f"📝 {len(utterances)}個の単位に分割しました")
+        print(f"📝 Split into {len(utterances)} units")
 
-        # 2. チャンク化
+        # 2. Create chunks
         chunks = self.chunk_conversations(utterances)
-        print(f"✂️ {len(chunks)}個のチャンクに分割しました")
+        print(f"✂️ Split into {len(chunks)} chunks")
 
-        # 3. ベクトル化
+        # 3. Vectorize
         embeddings = self.generate_embeddings(chunks)
 
-        # 4. Zilliz Cloudに保存
+        # 4. Save to Zilliz Cloud
         self.insert_to_zilliz(chunks, embeddings)
 
-        print("🎉 処理が完了しました！")
+        print("🎉 Processing completed!")
         return chunks
 
     def search_similar(self, query: str, limit: int = 5) -> List[Dict]:
         """
-        類似検索
+        Similarity search
         Args:
-            query: 検索クエリ
-            limit: 取得件数
+            query: Search query
+            limit: Number of results to return
         Returns:
-            検索結果
+            Search results
         """
-        # クエリのベクトル化
+        # Vectorize query
         query_embedding = self.embedding_model.encode([query])
 
         search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
@@ -305,37 +307,35 @@ class ConversationVectorizer:
         ]
 
 
-# 使用例
+# Usage example
 def main():
-    # サンプル一人語りテキスト
-    sample_monologue = """
-今日は人工知能の発展について考えてみたいと思います。
-近年、機械学習技術の進歩により、様々な分野で AI の活用が進んでいます。特に自然言語処理の分野では、大規模言語モデルの登場により、人間とほぼ同等の文章生成が可能になりました。
 
-しかし、これらの技術にはまだ課題も多く存在します。データの品質やバイアスの問題、計算資源の大量消費、そして何より人間の雇用への影響などが懸念されています。
+    extractor = S3JsonTextExtractor()
 
-一方で、AI技術は医療診断の精度向上や、新薬開発の加速、気候変動対策など、人類の重要な課題解決にも大きく貢献する可能性を秘めています。重要なのは、技術の発展と人間社会の調和を保ちながら、持続可能な方法で AI を活用することだと考えています。
-"""
+    bucket_name = os.getenv("S3_BUCKET_NAME")
+    json_files = extractor.list_json_files_in_bucket(bucket_name)
 
-    # 環境変数から認証情報を取得（実際の使用時）
+    # Get authentication info from environment variables (for actual use)
     zilliz_uri = os.getenv("ZILLIZ_URI", "your-zilliz-uri")
     zilliz_token = os.getenv("ZILLIZ_TOKEN", "your-zilliz-token")
-
     try:
-        # ベクトライザーの初期化
         vectorizer = ConversationVectorizer(zilliz_uri, zilliz_token)
+        for json_file_key in json_files:
+            print(f"Processing file: {json_file_key}")
 
-        # 一人語りテキストの処理
-        chunks = vectorizer.process_monologue(sample_monologue)
-
-        # サンプル検索
-        print("\n🔍 検索テスト:")
-        results = vectorizer.search_similar("AIの課題", limit=3)
-        for i, result in enumerate(results, 1):
-            print(f"{i}. {result['text'][:100]}... (スコア: {result['score']:.3f})")
+            # Extract text from JSON file
+            result = extractor.extract_text_from_s3_json(bucket_name, json_file_key)
+            sample_monologue = result["extracted_texts"][0]["text"]
+            chunks = vectorizer.process_monologue(sample_monologue)
 
     except Exception as e:
-        print(f"❌ エラーが発生しました: {e}")
+        print(f"❌ An error occurred: {e}")
+
+    # Sample search
+    print("\n🔍 Search test:")
+    results = vectorizer.search_similar("仕事の楽しみ方", limit=3)
+    for i, result in enumerate(results, 1):
+        print(f"{i}. {result['text'][:100]}... (Score: {result['score']:.3f})")
 
 
 if __name__ == "__main__":
