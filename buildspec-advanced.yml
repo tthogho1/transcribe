@@ -1,0 +1,235 @@
+version: 0.2
+
+# Advanced buildspec for production deployments
+env:
+  variables:
+    AWS_DEFAULT_REGION: ap-northeast-1
+    IMAGE_REPO_NAME: transcribe-service
+    IMAGE_TAG: latest
+    DOCKERFILE_PATH: ./Dockerfile
+    DOCKER_BUILDKIT: '1'
+  parameter-store:
+    # Store these in AWS Systems Manager Parameter Store
+    AWS_ACCOUNT_ID: /codebuild/aws-account-id
+    ECR_REPOSITORY_URI: /codebuild/ecr-repository-uri
+    ECS_CLUSTER_NAME: /codebuild/ecs-cluster-name
+    ECS_SERVICE_NAME: /codebuild/ecs-service-name
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+      python: 3.11
+    commands:
+      - echo Installing additional tools...
+      - pip install --upgrade pip
+      - pip install awscli boto3
+      - echo Installed versions:
+      - aws --version
+      - docker --version
+      - python --version
+
+  pre_build:
+    commands:
+      - echo Pre-build phase started on `date`
+      - echo Current directory is `pwd`
+      - echo Listing files in current directory:
+      - ls -la
+
+      # Set up build variables
+      - REPOSITORY_URI=${ECR_REPOSITORY_URI:-$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME}
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - BUILD_TAG=${COMMIT_HASH:-latest}
+      - BUILD_NUMBER=${CODEBUILD_BUILD_NUMBER:-0}
+      - TIMESTAMP=$(date +%Y%m%d%H%M%S)
+
+      # Create comprehensive tagging strategy
+      - IMAGE_TAG_LATEST=$REPOSITORY_URI:latest
+      - IMAGE_TAG_COMMIT=$REPOSITORY_URI:$BUILD_TAG
+      - IMAGE_TAG_BUILD=$REPOSITORY_URI:build-$BUILD_NUMBER
+      - IMAGE_TAG_TIMESTAMP=$REPOSITORY_URI:$TIMESTAMP
+
+      - echo "Repository URI: $REPOSITORY_URI"
+      - echo "Commit Hash: $COMMIT_HASH"
+      - echo "Build Tag: $BUILD_TAG"
+      - echo "Build Number: $BUILD_NUMBER"
+      - echo "Timestamp: $TIMESTAMP"
+
+      # Log in to Amazon ECR
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+      # Ensure ECR repository exists
+      - echo Checking ECR repository...
+      - |
+        if ! aws ecr describe-repositories --repository-names $IMAGE_REPO_NAME --region $AWS_DEFAULT_REGION 2>/dev/null; then
+          echo "Creating ECR repository $IMAGE_REPO_NAME..."
+          aws ecr create-repository \
+            --repository-name $IMAGE_REPO_NAME \
+            --region $AWS_DEFAULT_REGION \
+            --image-scanning-configuration scanOnPush=true
+          
+          # Set lifecycle policy to manage old images
+          aws ecr put-lifecycle-policy \
+            --repository-name $IMAGE_REPO_NAME \
+            --lifecycle-policy-text '{
+              "rules": [
+                {
+                  "rulePriority": 1,
+                  "selection": {
+                    "tagStatus": "untagged",
+                    "countType": "sinceImagePushed",
+                    "countUnit": "days",
+                    "countNumber": 7
+                  },
+                  "action": {
+                    "type": "expire"
+                  }
+                },
+                {
+                  "rulePriority": 2,
+                  "selection": {
+                    "tagStatus": "tagged",
+                    "tagPrefixList": ["build-"],
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 10
+                  },
+                  "action": {
+                    "type": "expire"
+                  }
+                }
+              ]
+            }'
+        else
+          echo "ECR repository $IMAGE_REPO_NAME already exists"
+        fi
+
+  build:
+    commands:
+      - echo Build phase started on `date`
+
+      # Validate Dockerfile
+      - echo Validating Dockerfile...
+      - |
+        if [ ! -f "$DOCKERFILE_PATH" ]; then
+          echo "Error: Dockerfile not found at $DOCKERFILE_PATH"
+          exit 1
+        fi
+
+      # Build Docker image with comprehensive tagging and caching
+      - echo Building Docker image...
+      - echo "Using Dockerfile: $DOCKERFILE_PATH"
+      - |
+        docker build \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from $IMAGE_TAG_LATEST \
+          --file $DOCKERFILE_PATH \
+          --tag $IMAGE_TAG_LATEST \
+          --tag $IMAGE_TAG_COMMIT \
+          --tag $IMAGE_TAG_BUILD \
+          --tag $IMAGE_TAG_TIMESTAMP \
+          .
+
+      # Run security scan (optional)
+      - echo Running basic security checks...
+      - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --exit-code 0 --severity HIGH,CRITICAL $IMAGE_TAG_LATEST || echo "Security scan completed with warnings"
+
+      # Test the image
+      - echo Testing Docker image...
+      - docker run --rm $IMAGE_TAG_LATEST python -c "import boto3, json, logging; print('Image test passed')"
+
+  post_build:
+    commands:
+      - echo Post-build phase started on `date`
+
+      # Push all image tags
+      - echo Pushing Docker images to ECR...
+      - docker push $IMAGE_TAG_LATEST
+      - docker push $IMAGE_TAG_COMMIT
+      - docker push $IMAGE_TAG_BUILD
+      - docker push $IMAGE_TAG_TIMESTAMP
+
+      # Create artifacts for deployment
+      - echo Creating deployment artifacts...
+
+      # Create imagedefinitions.json for ECS deployment
+      - |
+        cat > imagedefinitions.json << EOF
+        [
+          {
+            "name": "transcribe-container",
+            "imageUri": "$IMAGE_TAG_COMMIT"
+          }
+        ]
+        EOF
+
+      # Update ECS task definition with new image
+      - |
+        if [ -f "ecs-task-definition.json" ]; then
+          echo "Updating ECS task definition..."
+          sed "s|{AWS_ACCOUNT_ID}|$AWS_ACCOUNT_ID|g; s|{AWS_REGION}|$AWS_DEFAULT_REGION|g" ecs-task-definition.json > ecs-task-definition-updated.json
+          
+          # Update image URI in task definition
+          python3 << EOF
+        import json
+
+        with open('ecs-task-definition-updated.json', 'r') as f:
+            task_def = json.load(f)
+
+        # Update container image
+        for container in task_def['containerDefinitions']:
+            if container['name'] == 'transcribe-container':
+                container['image'] = '$IMAGE_TAG_COMMIT'
+
+        with open('ecs-task-definition-final.json', 'w') as f:
+            json.dump(task_def, f, indent=2)
+        EOF
+        else
+          echo "Warning: ecs-task-definition.json not found"
+        fi
+
+      # Create deployment summary
+      - |
+        cat > deployment-summary.json << EOF
+        {
+          "buildNumber": "$BUILD_NUMBER",
+          "commitHash": "$COMMIT_HASH",
+          "timestamp": "$TIMESTAMP",
+          "imageUri": "$IMAGE_TAG_COMMIT",
+          "repositoryUri": "$REPOSITORY_URI",
+          "region": "$AWS_DEFAULT_REGION",
+          "ecsCluster": "${ECS_CLUSTER_NAME:-transcribe-cluster}",
+          "ecsService": "${ECS_SERVICE_NAME:-transcribe-service}"
+        }
+        EOF
+
+      # Display build information
+      - echo "=== BUILD SUMMARY ==="
+      - echo "Build Number: $BUILD_NUMBER"
+      - echo "Commit Hash: $COMMIT_HASH"
+      - echo "Image URI: $IMAGE_TAG_COMMIT"
+      - echo "Timestamp: $TIMESTAMP"
+      - echo "===================="
+
+      - cat imagedefinitions.json
+      - echo Build completed on `date`
+
+artifacts:
+  files:
+    - imagedefinitions.json
+    - ecs-task-definition-final.json
+    - deployment-summary.json
+  name: transcribe-service-build-$BUILD_NUMBER
+
+cache:
+  paths:
+    - '/root/.cache/pip/**/*'
+    - '/var/lib/docker/**/*'
+    - '/root/.docker/**/*'
+
+reports:
+  security_report:
+    files:
+      - 'trivy-report.json'
+    base-directory: '.'
+    file-format: 'CUCUMBERJSON'
