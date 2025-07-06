@@ -98,12 +98,12 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: !Sub '${CodeBuildArtifactsBucket}/*'
+                Resource: !Sub 'arn:aws:s3:::${CodeBuildArtifactsBucket}/*'
 
               - Effect: Allow
                 Action:
                   - s3:ListBucket
-                Resource: !Ref CodeBuildArtifactsBucket
+                Resource: !Sub 'arn:aws:s3:::${CodeBuildArtifactsBucket}'
 
               # ECR permissions
               - Effect: Allow
@@ -190,7 +190,7 @@ Resources:
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Artifacts:
         Type: S3
-        Location: !Sub '${CodeBuildArtifactsBucket}/artifacts'
+        Location: !Sub '${CodeBuildArtifactsBucket}'
         Name: !Sub '${ProjectName}-artifacts'
         Packaging: ZIP
       Environment:
@@ -254,7 +254,7 @@ Resources:
 
   # CodeBuild Webhook for automatic builds
   CodeBuildWebhook:
-    Type: AWS::CodeBuild::ProjectSourceVersion
+    Type: AWS::CodeBuild::Project
     Properties:
       ProjectName: !Ref CodeBuildProject
       SourceVersion: !Ref GitHubBranch
