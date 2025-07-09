@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 
 # Required libraries
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType
 import numpy as np
@@ -36,8 +36,6 @@ class ConversationVectorizer:
         zilliz_uri: str,
         zilliz_token: str,
         embedding_model: str = "sonoisa/sentence-bert-base-ja-mean-tokens-v2",
-        chunk_size: int = 300,
-        chunk_overlap: int = 50,
     ):
         """
         Initialization
@@ -45,22 +43,17 @@ class ConversationVectorizer:
             zilliz_uri: Zilliz Cloud URI
             zilliz_token: Zilliz Cloud token
             embedding_model: Embedding model to use
-            chunk_size: Chunk size in characters
-            chunk_overlap: Overlap size in characters
         """
         self.zilliz_uri = zilliz_uri
         self.zilliz_token = zilliz_token
         self.embedding_model = SentenceTransformer(embedding_model)
         self.collection_name = "conversation_chunks"
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
 
-        # Initialize simple character-based text splitter
-        self.text_splitter = CharacterTextSplitter(
-            chunk_size=chunk_size,  # 厳密な文字数制限
-            chunk_overlap=chunk_overlap,  # オーバーラップサイズ
-            separator="",  # 文字単位で分割（区切り文字なし）
-            length_function=len,  # 文字数をカウント
+        # Initialize text splitter
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=300,  # Chunk size
+            chunk_overlap=50,  # Overlap
+            separators=["\n\n", "\n", "。", "！", "？", " ", ""],
         )
 
         self._connect_to_zilliz()
@@ -111,22 +104,51 @@ class ConversationVectorizer:
 
     def parse_monologue(self, text: str) -> List[Dict[str, Any]]:
         """
-        Parse monologue text as a single unit for character-based chunking
+        Parse monologue text into meaningful units
         Args:
             text: Monologue text
         Returns:
-            List of parsed content (single item containing entire text)
+            List of parsed content
         """
-        # Simply treat the entire text as one utterance
-        # Character-based chunking will be handled in chunk_conversations method
-        utterances = [
-            {
-                "speaker": "Speaker",
-                "content": text.strip(),  # 全テキストを1つの発言として扱う
-                "timestamp": datetime.now().isoformat(),
-                "text_index": 0,
-            }
-        ]
+        utterances = []
+
+        # Process by paragraphs if separated by line breaks
+        if "\n" in text:
+            paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+            for i, paragraph in enumerate(paragraphs):
+                utterances.append(
+                    {
+                        "speaker": "Speaker",
+                        "content": paragraph,
+                        "timestamp": datetime.now().isoformat(),
+                        "paragraph_index": i,
+                    }
+                )
+        else:
+            # Split by sentence endings if no line breaks
+            sentences = []
+            current_sentence = ""
+
+            for char in text:
+                current_sentence += char
+                if char in ["。", "！", "？"]:
+                    if current_sentence.strip():
+                        sentences.append(current_sentence.strip())
+                        current_sentence = ""
+
+            # Handle last sentence if it doesn't end with punctuation
+            if current_sentence.strip():
+                sentences.append(current_sentence.strip())
+
+            for i, sentence in enumerate(sentences):
+                utterances.append(
+                    {
+                        "speaker": "Speaker",
+                        "content": sentence,
+                        "timestamp": datetime.now().isoformat(),
+                        "sentence_index": i,
+                    }
+                )
 
         return utterances
 
@@ -134,7 +156,7 @@ class ConversationVectorizer:
         self, utterances: List[Dict[str, Any]]
     ) -> List[ConversationChunk]:
         """
-        Split utterances into chunks using simple character-based splitting
+        Split utterances into chunks
         Args:
             utterances: List of utterances
         Returns:
@@ -146,16 +168,30 @@ class ConversationVectorizer:
         for utterance in utterances:
             content = utterance["content"]
 
-            # Always use character-based splitting regardless of length
-            text_chunks = self.text_splitter.split_text(content)
-            for i, chunk_text in enumerate(text_chunks):
+            # Split long utterances
+            if len(content) > 300:
+                text_chunks = self.text_splitter.split_text(content)
+                for i, chunk_text in enumerate(text_chunks):
+                    chunks.append(
+                        ConversationChunk(
+                            id=f"chunk_{chunk_id:06d}",
+                            text=chunk_text,
+                            speaker=utterance["speaker"],
+                            timestamp=utterance["timestamp"],
+                            chunk_index=i,
+                            original_length=len(content),
+                        )
+                    )
+                    chunk_id += 1
+            else:
+                # Keep short utterances as-is
                 chunks.append(
                     ConversationChunk(
                         id=f"chunk_{chunk_id:06d}",
-                        text=chunk_text,
+                        text=content,
                         speaker=utterance["speaker"],
                         timestamp=utterance["timestamp"],
-                        chunk_index=i,
+                        chunk_index=0,
                         original_length=len(content),
                     )
                 )
@@ -282,15 +318,8 @@ def main():
     # Get authentication info from environment variables (for actual use)
     zilliz_uri = os.getenv("ZILLIZ_URI", "your-zilliz-uri")
     zilliz_token = os.getenv("ZILLIZ_TOKEN", "your-zilliz-token")
-
     try:
-        # Initialize with custom chunk size and overlap
-        vectorizer = ConversationVectorizer(
-            zilliz_uri,
-            zilliz_token,
-            chunk_size=300,  # 文字数ベースのチャンクサイズ
-            chunk_overlap=50,  # オーバーラップサイズ
-        )
+        vectorizer = ConversationVectorizer(zilliz_uri, zilliz_token)
         for json_file_key in json_files:
             print(f"Processing file: {json_file_key}")
 
