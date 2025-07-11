@@ -288,8 +288,8 @@ def main():
         vectorizer = ConversationVectorizer(
             zilliz_uri,
             zilliz_token,
-            chunk_size=300,  # 文字数ベースのチャンクサイズ
-            chunk_overlap=50,  # オーバーラップサイズ
+            chunk_size=200,  # 文字数ベースのチャンクサイズ
+            chunk_overlap=40,  # オーバーラップサイズ
         )
         for json_file_key in json_files:
             print(f"Processing file: {json_file_key}")
