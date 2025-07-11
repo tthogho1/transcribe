@@ -15,8 +15,9 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import openai
 from pymilvus import connections, Collection
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from dotenv import load_dotenv
+import cohere
 
 # Load environment variables
 load_dotenv()
@@ -59,7 +60,7 @@ class ChatResponse:
 
 
 class ZillizSearchEngine:
-    """Zilliz Cloud search engine for conversation retrieval"""
+    """Zilliz Cloud search engine for conversation retrieval with reranking"""
 
     def __init__(self):
         self.zilliz_uri = os.getenv("ZILLIZ_URI")
@@ -67,6 +68,29 @@ class ZillizSearchEngine:
         self.embedding_model = None
         self.collection = None
         self.collection_name = "conversation_chunks"
+
+        # Reranking configuration
+        self.rerank_method = os.getenv(
+            "RERANK_METHOD", "cross_encoder"
+        )  # "cohere" or "cross_encoder"
+        self.cohere_client = None
+        self.cross_encoder = None
+
+        # Cross Encoder CPU optimization settings
+        self.cross_encoder_device = os.getenv(
+            "CROSS_ENCODER_DEVICE", "auto"
+        )  # "cpu", "cuda", "auto"
+        self.cross_encoder_batch_size = int(
+            os.getenv("CROSS_ENCODER_BATCH_SIZE", "8")
+        )  # Smaller for CPU
+        self.cross_encoder_max_length = int(
+            os.getenv("CROSS_ENCODER_MAX_LENGTH", "512")
+        )
+
+        # Search parameters
+        self.initial_search_multiplier = int(
+            os.getenv("INITIAL_SEARCH_MULTIPLIER", "3")
+        )  # Search 3x more for reranking
 
         self._initialize()
 
@@ -78,6 +102,9 @@ class ZillizSearchEngine:
             self.embedding_model = SentenceTransformer(
                 "sonoisa/sentence-bert-base-ja-mean-tokens-v2"
             )
+
+            # Initialize reranking models
+            self._initialize_reranking()
 
             # Connect to Zilliz Cloud
             logger.info("Connecting to Zilliz Cloud...")
@@ -95,18 +122,182 @@ class ZillizSearchEngine:
             logger.error(f"❌ Failed to initialize Zilliz search engine: {e}")
             raise
 
+    def _initialize_reranking(self):
+        """Initialize reranking models"""
+        try:
+            if self.rerank_method == "cohere":
+                # Initialize Cohere client
+                cohere_api_key = os.getenv("COHERE_API_KEY")
+                if cohere_api_key:
+                    self.cohere_client = cohere.Client(cohere_api_key)
+                    logger.info("✅ Cohere reranker initialized")
+                else:
+                    logger.warning(
+                        "⚠️ COHERE_API_KEY not found, falling back to cross encoder"
+                    )
+                    self.rerank_method = "cross_encoder"
+
+            if self.rerank_method == "cross_encoder":
+                # Initialize Cross Encoder model with device optimization
+                logger.info("Loading cross encoder model...")
+
+                # Determine device
+                import torch
+
+                if self.cross_encoder_device == "auto":
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                else:
+                    device = self.cross_encoder_device
+
+                logger.info(f"Using device: {device}")
+
+                # Initialize with device and optimization settings
+                self.cross_encoder = CrossEncoder(
+                    "cross-encoder/ms-marco-MiniLM-L-6-v2",  # Can be replaced with Japanese-specific model
+                    max_length=self.cross_encoder_max_length,
+                    device=device,
+                )
+
+                # Set batch size for prediction
+                if hasattr(self.cross_encoder, "max_batch_size"):
+                    self.cross_encoder.max_batch_size = self.cross_encoder_batch_size
+
+                logger.info(
+                    f"✅ Cross encoder reranker initialized on {device} (batch_size={self.cross_encoder_batch_size})"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Reranking initialization failed: {e}, using vector search only"
+            )
+            self.rerank_method = None
+
+    def _rerank_results(
+        self, query: str, search_results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """
+        Rerank search results using the configured reranking method
+
+        Args:
+            query: Original search query
+            search_results: Initial search results from vector search
+
+        Returns:
+            Reranked search results
+        """
+        if not self.rerank_method or len(search_results) <= 1:
+            return search_results
+
+        try:
+            if self.rerank_method == "cohere" and self.cohere_client:
+                return self._rerank_with_cohere(query, search_results)
+            elif self.rerank_method == "cross_encoder" and self.cross_encoder:
+                return self._rerank_with_cross_encoder(query, search_results)
+            else:
+                logger.warning(
+                    "⚠️ No reranking method available, returning original results"
+                )
+                return search_results
+
+        except Exception as e:
+            logger.error(f"❌ Reranking failed: {e}, returning original results")
+            return search_results
+
+    def _rerank_with_cohere(
+        self, query: str, search_results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """Rerank using Cohere Rerank API"""
+        try:
+            # Prepare documents for reranking
+            documents = [result.text for result in search_results]
+
+            # Call Cohere Rerank API
+            response = self.cohere_client.rerank(
+                model="rerank-multilingual-v2.0",  # Supports Japanese
+                query=query,
+                documents=documents,
+                top_k=len(documents),
+            )
+
+            # Reorder results based on Cohere scores
+            reranked_results = []
+            for result in response.results:
+                original_result = search_results[result.index]
+                # Update score with rerank score
+                reranked_result = SearchResult(
+                    text=original_result.text,
+                    speaker=original_result.speaker,
+                    timestamp=original_result.timestamp,
+                    score=float(result.relevance_score),  # Use Cohere rerank score
+                    similarity=original_result.similarity,  # Keep original similarity
+                )
+                reranked_results.append(reranked_result)
+
+            logger.info(f"✅ Reranked {len(reranked_results)} results using Cohere")
+            return reranked_results
+
+        except Exception as e:
+            logger.error(f"❌ Cohere reranking error: {e}")
+            return search_results
+
+    def _rerank_with_cross_encoder(
+        self, query: str, search_results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """Rerank using Cross Encoder model with CPU optimization"""
+        try:
+            # Prepare query-document pairs
+            query_doc_pairs = [(query, result.text) for result in search_results]
+
+            # Get cross encoder scores with batch processing for CPU efficiency
+            if len(query_doc_pairs) <= self.cross_encoder_batch_size:
+                # Small batch - process all at once
+                scores = self.cross_encoder.predict(query_doc_pairs)
+            else:
+                # Large batch - process in chunks for CPU memory efficiency
+                scores = []
+                for i in range(0, len(query_doc_pairs), self.cross_encoder_batch_size):
+                    batch = query_doc_pairs[i : i + self.cross_encoder_batch_size]
+                    batch_scores = self.cross_encoder.predict(batch)
+                    scores.extend(batch_scores)
+
+            # Combine results with new scores
+            scored_results = []
+            for i, result in enumerate(search_results):
+                reranked_result = SearchResult(
+                    text=result.text,
+                    speaker=result.speaker,
+                    timestamp=result.timestamp,
+                    score=float(scores[i]),  # Use cross encoder score
+                    similarity=result.similarity,  # Keep original similarity
+                )
+                scored_results.append(reranked_result)
+
+            # Sort by new scores (descending)
+            reranked_results = sorted(
+                scored_results, key=lambda x: x.score, reverse=True
+            )
+
+            logger.info(
+                f"✅ Reranked {len(reranked_results)} results using Cross Encoder (batch_size={self.cross_encoder_batch_size})"
+            )
+            return reranked_results
+
+        except Exception as e:
+            logger.error(f"❌ Cross encoder reranking error: {e}")
+            return search_results
+
     def search_similar_conversations(
         self, query: str, limit: int = 5
     ) -> List[SearchResult]:
         """
-        Search for similar conversations in Zilliz Cloud
+        Search for similar conversations in Zilliz Cloud with reranking
 
         Args:
             query: Search query
-            limit: Number of results to return
+            limit: Number of final results to return
 
         Returns:
-            List of search results
+            List of search results (reranked if enabled)
         """
         try:
             # Generate query embedding
@@ -118,12 +309,17 @@ class ZillizSearchEngine:
                 "params": {"nprobe": 10},
             }
 
-            # Perform search
+            # Search for more results initially if reranking is enabled
+            initial_limit = (
+                limit * self.initial_search_multiplier if self.rerank_method else limit
+            )
+
+            # Perform initial vector search
             results = self.collection.search(
                 query_embedding,
                 "embedding",
                 search_params,
-                limit=limit,
+                limit=initial_limit,
                 output_fields=["text", "speaker", "timestamp"],
             )
 
@@ -136,15 +332,23 @@ class ZillizSearchEngine:
                         speaker=hit.entity.get("speaker", "Unknown"),
                         timestamp=hit.entity.get("timestamp", ""),
                         score=float(hit.score),
-                        similarity=float(
-                            hit.score
-                        ),  # In case we want to calculate differently
+                        similarity=float(hit.score),
                     )
                 )
 
             logger.info(
-                f"Found {len(search_results)} similar conversations for query: {query}"
+                f"Found {len(search_results)} initial results for query: {query}"
             )
+
+            # Apply reranking if enabled
+            if self.rerank_method and len(search_results) > 1:
+                logger.info(f"Applying {self.rerank_method} reranking...")
+                search_results = self._rerank_results(query, search_results)
+
+                # Trim to requested limit after reranking
+                search_results = search_results[:limit]
+
+            logger.info(f"Returning {len(search_results)} final results")
             return search_results
 
         except Exception as e:
@@ -188,16 +392,16 @@ class OpenAIGenerator:
             context = "\n".join(context_parts)
 
             # Create system prompt
-            system_prompt = """You are a helpful AI assistant that answers questions based on conversation transcripts. 
-            Use the provided context from past conversations to answer the user's question. 
-            If the context doesn't contain relevant information, say so clearly.
-            Always be helpful, accurate, and cite the context when possible.
-            
-            Guidelines:
-            - Answer in the same language as the question
-            - Be concise but comprehensive
-            - If multiple speakers discussed the topic, mention different perspectives
-            - Include relevant quotes from the conversations when helpful
+            system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
+                If the context does not include relevant information, clarify it.
+                Also, guide the user to correct their mistake if they misunderstood the context.
+
+                Important:
+                Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
+
+                Guidelines:
+                - Answer in Japanese
+                - Answer casually in the same tone as the related conversation
             """
 
             # Create user prompt
@@ -381,6 +585,19 @@ def health_check():
                     else "disconnected"
                 ),
                 "openai": "configured" if openai.api_key else "not configured",
+                "reranking": {
+                    "method": chat_service.search_engine.rerank_method,
+                    "cohere": (
+                        "configured"
+                        if chat_service.search_engine.cohere_client
+                        else "not configured"
+                    ),
+                    "cross_encoder": (
+                        "loaded"
+                        if chat_service.search_engine.cross_encoder
+                        else "not loaded"
+                    ),
+                },
             },
         }
     )
