@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 
 # Required libraries
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType
 import numpy as np
@@ -27,6 +27,7 @@ class ConversationChunk:
     timestamp: str
     chunk_index: int
     original_length: int
+    file_name: str  # New field to store the file name
 
 
 class ConversationVectorizer:
@@ -56,11 +57,18 @@ class ConversationVectorizer:
         self.chunk_overlap = chunk_overlap
 
         # Initialize simple character-based text splitter
-        self.text_splitter = CharacterTextSplitter(
-            chunk_size=chunk_size,  # 厳密な文字数制限
-            chunk_overlap=chunk_overlap,  # オーバーラップサイズ
-            separator="",  # 文字単位で分割（区切り文字なし）
-            length_function=len,  # 文字数をカウント
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,  # Maximum chunk size
+            chunk_overlap=chunk_overlap,  # Overlap between chunks
+            separators=[
+                "\n\n",
+                "\n",
+                "。",
+                "！",
+                "？",
+                " ",
+                "",
+            ],  # Recursive separators
         )
 
         self._connect_to_zilliz()
@@ -92,6 +100,9 @@ class ConversationVectorizer:
             FieldSchema(name="timestamp", dtype=DataType.VARCHAR, max_length=50),
             FieldSchema(name="chunk_index", dtype=DataType.INT64),
             FieldSchema(name="original_length", dtype=DataType.INT64),
+            FieldSchema(
+                name="file_name", dtype=DataType.VARCHAR, max_length=255
+            ),  # Add file_name field
         ]
 
         schema = CollectionSchema(fields, "Collection for conversation chunks")
@@ -131,12 +142,13 @@ class ConversationVectorizer:
         return utterances
 
     def chunk_conversations(
-        self, utterances: List[Dict[str, Any]]
+        self, utterances: List[Dict[str, Any]], file_name: str
     ) -> List[ConversationChunk]:
         """
         Split utterances into chunks using simple character-based splitting
         Args:
             utterances: List of utterances
+            file_name: Name of the file being processed
         Returns:
             List of chunks
         """
@@ -157,6 +169,7 @@ class ConversationVectorizer:
                         timestamp=utterance["timestamp"],
                         chunk_index=i,
                         original_length=len(content),
+                        file_name=file_name,  # Include file name
                     )
                 )
                 chunk_id += 1
@@ -193,6 +206,7 @@ class ConversationVectorizer:
             [chunk.timestamp for chunk in chunks],
             [chunk.chunk_index for chunk in chunks],
             [chunk.original_length for chunk in chunks],
+            [chunk.file_name for chunk in chunks],  # Include file name
         ]
 
         try:
@@ -226,7 +240,7 @@ class ConversationVectorizer:
         print(f"📝 Split into {len(utterances)} units")
 
         # 2. Create chunks
-        chunks = self.chunk_conversations(utterances)
+        chunks = self.chunk_conversations(utterances, "sample_file.json")
         print(f"✂️ Split into {len(chunks)} chunks")
 
         # 3. Vectorize
