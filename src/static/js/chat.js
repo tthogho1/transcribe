@@ -68,7 +68,7 @@ class ChatInterface {
     }
   }
 
-  addMessage(content, isUser = false, timestamp = null, tokens = null) {
+  addMessage(content, isUser = false, timestamp = null, tokens = null, related = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
 
@@ -82,6 +82,18 @@ class ChatInterface {
 
     if (tokens) {
       html += `<span class="tokens">Tokens: ${tokens}</span>`;
+    }
+
+    if (related) {
+      console.log('Related videos:', related);
+      const youtubeURL = 'https://www.youtube.com/watch?v=';
+      html += `<br><span class="related">Related:</span><br>`;
+      related.forEach(item => {
+        const youtubeId = item.replace(/\.json$/, '');
+        html += `<a href="${youtubeURL + youtubeId}" class="related-item">${
+          youtubeURL + youtubeId
+        }</a><br>`;
+      });
     }
 
     messageDiv.innerHTML = html;
@@ -224,7 +236,7 @@ class ChatInterface {
 
   handleChatResponse(data) {
     this.hideTypingIndicator();
-    this.addMessage(data.answer, false, data.timestamp, data.tokens_used);
+    this.addMessage(data.answer, false, data.timestamp, data.tokens_used, data.file_names);
     this.updateSources(data.sources);
     this.setLoadingState(false);
 
