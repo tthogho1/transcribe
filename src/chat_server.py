@@ -18,6 +18,8 @@ from pymilvus import connections, Collection
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from dotenv import load_dotenv
 import cohere
+from langdetect import detect
+from deep_translator import GoogleTranslator
 
 # Load environment variables
 load_dotenv()
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # OpenAI Configuration
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -46,6 +48,7 @@ class SearchResult:
     timestamp: str
     score: float
     similarity: float
+    file_name: str  # New field to store the file name
 
 
 @dataclass
@@ -57,6 +60,7 @@ class ChatResponse:
     query: str
     timestamp: str
     tokens_used: int
+    file_names: List[str]  # New field to store file names
 
 
 class ZillizSearchEngine:
@@ -230,6 +234,7 @@ class ZillizSearchEngine:
                     timestamp=original_result.timestamp,
                     score=float(result.relevance_score),  # Use Cohere rerank score
                     similarity=original_result.similarity,  # Keep original similarity
+                    file_name=original_result.file_name,  # Keep original file_name
                 )
                 reranked_results.append(reranked_result)
 
@@ -269,6 +274,7 @@ class ZillizSearchEngine:
                     timestamp=result.timestamp,
                     score=float(scores[i]),  # Use cross encoder score
                     similarity=result.similarity,  # Keep original similarity
+                    file_name=result.file_name,  # Keep original file_name
                 )
                 scored_results.append(reranked_result)
 
@@ -320,7 +326,12 @@ class ZillizSearchEngine:
                 "embedding",
                 search_params,
                 limit=initial_limit,
-                output_fields=["text", "speaker", "timestamp"],
+                output_fields=[
+                    "text",
+                    "speaker",
+                    "timestamp",
+                    "file_name",
+                ],  # Include file_name
             )
 
             # Convert results to SearchResult objects
@@ -333,6 +344,9 @@ class ZillizSearchEngine:
                         timestamp=hit.entity.get("timestamp", ""),
                         score=float(hit.score),
                         similarity=float(hit.score),
+                        file_name=hit.entity.get(
+                            "file_name", "Unknown"
+                        ),  # Include file_name
                     )
                 )
 
@@ -360,13 +374,16 @@ class OpenAIGenerator:
     """OpenAI GPT integration for generating responses"""
 
     def __init__(self):
-        self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Note: OpenAI client initialization is handled through openai.api_key
         self.model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
 
     def generate_response(
-        self, query: str, search_results: List[SearchResult]
+        self,
+        query: str,
+        search_results: List[SearchResult],
+        is_english_input: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate response using OpenAI with search results as context
@@ -374,6 +391,7 @@ class OpenAIGenerator:
         Args:
             query: User's question
             search_results: Relevant conversation excerpts from Zilliz
+            is_english_input: Whether the original input was in English
 
         Returns:
             Dictionary containing response and metadata
@@ -391,18 +409,31 @@ class OpenAIGenerator:
 
             context = "\n".join(context_parts)
 
-            # Create system prompt
-            system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
-                If the context does not include relevant information, clarify it.
-                Also, guide the user to correct their mistake if they misunderstood the context.
+            # Create system prompt based on language
+            if is_english_input:
+                system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
+                    If the context does not include relevant information, clarify it.
+                    Also, guide the user to correct their mistake if they misunderstood the context.
 
-                Important:
-                Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
+                    Important:
+                    Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
 
-                Guidelines:
-                - Answer in Japanese
-                - Answer casually in the same tone as the related conversation
-            """
+                    Guidelines:
+                    - Answer in English
+                    - Answer casually in a natural conversational tone
+                """
+            else:
+                system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
+                    If the context does not include relevant information, clarify it.
+                    Also, guide the user to correct their mistake if they misunderstood the context.
+
+                    Important:
+                    Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
+
+                    Guidelines:
+                    - Answer in Japanese
+                    - Answer casually in the same tone as the related conversation
+                """
 
             # Create user prompt
             user_prompt = f"""Question: {query}
@@ -413,7 +444,7 @@ Context from relevant conversations:
 Please provide a helpful answer based on the above context. If the context doesn't contain enough information to answer the question, please say so."""
 
             # Generate response
-            response = self.client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -423,16 +454,29 @@ Please provide a helpful answer based on the above context. If the context doesn
                 temperature=self.temperature,
             )
 
+            answer = response.choices[0].message.content
+
+            # If English input but Japanese response generated, translate back to English
+            if is_english_input and detect(answer) == "ja":
+                logger.info("Translating response back to English...")
+                en_translator = GoogleTranslator(source="ja", target="en")
+                answer = en_translator.translate(answer)
+
             return {
-                "answer": response.choices[0].message.content,
+                "answer": answer,
                 "tokens_used": response.usage.total_tokens,
                 "model": self.model,
             }
 
         except Exception as e:
             logger.error(f"Error generating OpenAI response: {e}")
+            error_message = (
+                "Sorry, an error occurred while generating the response."
+                if is_english_input
+                else "申し訳ございませんが、回答の生成中にエラーが発生しました。"
+            )
             return {
-                "answer": "申し訳ございませんが、回答の生成中にエラーが発生しました。",
+                "answer": error_message,
                 "tokens_used": 0,
                 "model": self.model,
                 "error": str(e),
@@ -445,6 +489,7 @@ class ChatService:
     def __init__(self):
         self.search_engine = ZillizSearchEngine()
         self.ai_generator = OpenAIGenerator()
+        self.translator = GoogleTranslator(source="auto", target="ja")
 
     def process_chat_query(self, query: str, max_results: int = 5) -> ChatResponse:
         """
@@ -458,33 +503,57 @@ class ChatService:
             ChatResponse with answer and sources
         """
         try:
+            # Detect language for response formatting
+            original_query = query
+            detected_language = detect(query)
+            is_english_input = detected_language == "en"
+
+            if is_english_input:
+                logger.info(
+                    "Detected English prompt. Translating to Japanese for search..."
+                )
+                query = self.translator.translate(query)
+                logger.info(f"Translated prompt for search: {query}")
+
             # Search for relevant conversations
             search_results = self.search_engine.search_similar_conversations(
                 query, limit=max_results
             )
 
             # Generate AI response
-            ai_response = self.ai_generator.generate_response(query, search_results)
+            ai_response = self.ai_generator.generate_response(
+                query, search_results, is_english_input
+            )
+
+            # Collect file names from search results
+            file_names = list({result.file_name for result in search_results})
 
             # Create chat response
             chat_response = ChatResponse(
                 answer=ai_response["answer"],
                 sources=search_results,
-                query=query,
+                query=original_query,  # Use original query in response
                 timestamp=datetime.now().isoformat(),
                 tokens_used=ai_response["tokens_used"],
+                file_names=file_names,  # Include file names
             )
 
             return chat_response
 
         except Exception as e:
             logger.error(f"Error processing chat query: {e}")
+            error_message = (
+                "Sorry, an error occurred during processing."
+                if "is_english_input" in locals() and is_english_input
+                else "申し訳ございませんが、処理中にエラーが発生しました。"
+            )
             return ChatResponse(
-                answer="申し訳ございませんが、処理中にエラーが発生しました。",
+                answer=error_message,
                 sources=[],
-                query=query,
+                query=original_query if "original_query" in locals() else query,
                 timestamp=datetime.now().isoformat(),
                 tokens_used=0,
+                file_names=[],  # Return empty file names on error
             )
 
 
@@ -522,12 +591,14 @@ def api_chat():
                         "speaker": source.speaker,
                         "timestamp": source.timestamp,
                         "score": source.score,
+                        "file_name": source.file_name,  # Include file name
                     }
                     for source in response.sources
                 ],
                 "query": response.query,
                 "timestamp": response.timestamp,
                 "tokens_used": response.tokens_used,
+                "file_names": response.file_names,  # Include file names in the response
             }
         )
 
@@ -643,12 +714,14 @@ def handle_chat_message(data):
                         "speaker": source.speaker,
                         "timestamp": source.timestamp,
                         "score": source.score,
+                        "file_name": source.file_name,  # Include file name
                     }
                     for source in response.sources
                 ],
                 "query": response.query,
                 "timestamp": response.timestamp,
                 "tokens_used": response.tokens_used,
+                "file_names": response.file_names,  # Include file names in the response
             },
         )
 
