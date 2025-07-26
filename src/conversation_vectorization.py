@@ -182,11 +182,15 @@ class ConversationVectorizer:
         Args:
             chunks: List of chunks
         Returns:
-            List of embedding vectors
+            List of embedding vectors (L2 normalized)
         """
         texts = [chunk.text for chunk in chunks]
         embeddings = self.embedding_model.encode(texts)
-        print(f"✅ Vectorized {len(chunks)} chunks")
+
+        # Apply L2 normalization for cosine similarity
+        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
+        print(f"✅ Vectorized and normalized {len(chunks)} chunks")
         return embeddings
 
     def insert_to_zilliz(
@@ -261,8 +265,11 @@ class ConversationVectorizer:
         Returns:
             Search results
         """
-        # Vectorize query
+        # Vectorize query and apply L2 normalization
         query_embedding = self.embedding_model.encode([query])
+        query_embedding = query_embedding / np.linalg.norm(
+            query_embedding, axis=1, keepdims=True
+        )
 
         search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
 
