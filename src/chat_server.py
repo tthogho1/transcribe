@@ -309,10 +309,17 @@ class ZillizSearchEngine:
             # Generate query embedding
             query_embedding = self.embedding_model.encode([query])
 
+            # Ensure L2 normalization for cosine similarity
+            import numpy as np
+
+            query_embedding = query_embedding / np.linalg.norm(
+                query_embedding, axis=1, keepdims=True
+            )
+
             # Search parameters
             search_params = {
-                "metric_type": "IP",  # Inner Product
-                "params": {"nprobe": 10},
+                "metric_type": "IP",  # Inner Product (with normalized vectors = cosine similarity)
+                "params": {"nprobe": 20},
             }
 
             # Search for more results initially if reranking is enabled
@@ -423,9 +430,7 @@ class OpenAIGenerator:
                     - Answer casually in a natural conversational tone
                 """
             else:
-                system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
-                    If the context does not include relevant information, clarify it.
-                    Also, guide the user to correct their mistake if they misunderstood the context.
+                system_prompt = """Answer users' questions by talking about your past experiences.
 
                     Important:
                     Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
@@ -506,7 +511,7 @@ class ChatService:
             # Detect language for response formatting
             original_query = query
             detected_language = detect(query)
-            is_english_input = detected_language == "en"
+            is_english_input = detected_language != "ja"
 
             if is_english_input:
                 logger.info(
