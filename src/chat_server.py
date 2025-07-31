@@ -88,7 +88,7 @@ class ZillizSearchEngine:
             os.getenv("CROSS_ENCODER_BATCH_SIZE", "8")
         )  # Smaller for CPU
         self.cross_encoder_max_length = int(
-            os.getenv("CROSS_ENCODER_MAX_LENGTH", "512")
+            os.getenv("CROSS_EeqhhNCODER_MAX_LENGTH", "512")
         )
 
         # Search parameters
