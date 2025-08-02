@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import scipy.sparse as sp
 
-from .conversation_chunk import ConversationChunk, EmbeddingResult
+from models.conversation_chunk import ConversationChunk, EmbeddingResult
 
 
 class DenseVectorGenerator:

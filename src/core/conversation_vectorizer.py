@@ -5,11 +5,11 @@ Main conversation vectorizer orchestrating all components
 import os
 from typing import List, Dict
 
-from .conversation_chunk import ConversationChunk, SearchResult
-from .text_processor import TextProcessor
-from .vector_generator import HybridVectorGenerator
-from .zilliz_client import ZillizClient
-from .extract_text_fromS3 import S3JsonTextExtractor
+from models.conversation_chunk import ConversationChunk, SearchResult
+from services.processing.text_processor import TextProcessor
+from services.processing.vector_generator import HybridVectorGenerator
+from services.database.zilliz_client import ZillizClient
+from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
 from dotenv import load_dotenv
 

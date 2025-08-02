@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from .conversation_chunk import ConversationChunk
+from models.conversation_chunk import ConversationChunk
 
 
 class JapaneseTokenizer:

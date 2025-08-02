@@ -10,7 +10,11 @@ try:
     import os
 
     # Test individual components
-    from conversation_chunk import ConversationChunk, SearchResult, EmbeddingResult
+    from models.conversation_chunk import (
+        ConversationChunk,
+        SearchResult,
+        EmbeddingResult,
+    )
 
     print("✅ conversation_chunk imported")
 

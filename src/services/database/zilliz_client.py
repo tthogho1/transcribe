@@ -14,7 +14,11 @@ from pymilvus import (
     RRFRanker,
 )
 
-from .conversation_chunk import ConversationChunk, SearchResult, EmbeddingResult
+from models.conversation_chunk import (
+    ConversationChunk,
+    SearchResult,
+    EmbeddingResult,
+)
 
 
 class ZillizClient:

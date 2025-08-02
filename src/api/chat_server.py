@@ -21,6 +21,11 @@ import cohere
 from langdetect import detect
 from deep_translator import GoogleTranslator
 
+# Import from our models
+from models.conversation_chunk import SearchResult
+from core.conversation_vectorizer import ConversationVectorizer
+from services.database.zilliz_client import ZillizClient
+
 # Load environment variables
 load_dotenv()
 
@@ -31,24 +36,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # OpenAI Configuration
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
-
-@dataclass
-class SearchResult:
-    """Data class for search results"""
-
-    text: str
-    speaker: str
-    timestamp: str
-    score: float
-    similarity: float
-    file_name: str  # New field to store the file name
 
 
 @dataclass
@@ -88,7 +81,7 @@ class ZillizSearchEngine:
             os.getenv("CROSS_ENCODER_BATCH_SIZE", "8")
         )  # Smaller for CPU
         self.cross_encoder_max_length = int(
-            os.getenv("CROSS_EeqhhNCODER_MAX_LENGTH", "512")
+            os.getenv("CROSS_ENCODER_MAX_LENGTH", "512")
         )
 
         # Search parameters
@@ -232,9 +225,10 @@ class ZillizSearchEngine:
                     text=original_result.text,
                     speaker=original_result.speaker,
                     timestamp=original_result.timestamp,
+                    file_name=original_result.file_name,
                     score=float(result.relevance_score),  # Use Cohere rerank score
                     similarity=original_result.similarity,  # Keep original similarity
-                    file_name=original_result.file_name,  # Keep original file_name
+                    search_type="cohere_rerank",  # Add search type
                 )
                 reranked_results.append(reranked_result)
 
@@ -272,9 +266,10 @@ class ZillizSearchEngine:
                     text=result.text,
                     speaker=result.speaker,
                     timestamp=result.timestamp,
+                    file_name=result.file_name,
                     score=float(scores[i]),  # Use cross encoder score
                     similarity=result.similarity,  # Keep original similarity
-                    file_name=result.file_name,  # Keep original file_name
+                    search_type="cross_encoder_rerank",  # Add search type
                 )
                 scored_results.append(reranked_result)
 
@@ -349,11 +344,10 @@ class ZillizSearchEngine:
                         text=hit.entity.get("text", ""),
                         speaker=hit.entity.get("speaker", "Unknown"),
                         timestamp=hit.entity.get("timestamp", ""),
+                        file_name=hit.entity.get("file_name", "Unknown"),
                         score=float(hit.score),
                         similarity=float(hit.score),
-                        file_name=hit.entity.get(
-                            "file_name", "Unknown"
-                        ),  # Include file_name
+                        search_type="vector_search",  # Add search type
                     )
                 )
 

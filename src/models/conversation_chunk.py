@@ -28,6 +28,7 @@ class SearchResult:
     timestamp: str
     file_name: str
     score: float
+    similarity: float
     search_type: str
 
     def to_dict(self) -> Dict[str, Any]:
@@ -38,6 +39,7 @@ class SearchResult:
             "timestamp": self.timestamp,
             "file_name": self.file_name,
             "score": self.score,
+            "similarity": self.similarity,
             "search_type": self.search_type,
         }
 
