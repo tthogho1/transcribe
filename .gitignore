@@ -218,7 +218,7 @@ temp/
 # Docker
 .dockerignore
 
-# Model files (large files)
+# Model files (large files) - ML models only
 *.pkl
 *.joblib
 *.model
@@ -233,7 +233,8 @@ temp/
 *.jsonl
 data/
 datasets/
-models/
+
+# Note: src/models/ contains Python data classes, not ML models, so it's tracked by git
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
