@@ -21,6 +21,11 @@ import cohere
 from langdetect import detect
 from deep_translator import GoogleTranslator
 
+# Import from our models
+from models.conversation_chunk import SearchResult
+from core.conversation_vectorizer import ConversationVectorizer
+from services.database.zilliz_client import ZillizClient
+
 # Load environment variables
 load_dotenv()
 
@@ -31,24 +36,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # OpenAI Configuration
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
-
-@dataclass
-class SearchResult:
-    """Data class for search results"""
-
-    text: str
-    speaker: str
-    timestamp: str
-    score: float
-    similarity: float
-    file_name: str  # New field to store the file name
 
 
 @dataclass
@@ -232,9 +225,10 @@ class ZillizSearchEngine:
                     text=original_result.text,
                     speaker=original_result.speaker,
                     timestamp=original_result.timestamp,
+                    file_name=original_result.file_name,
                     score=float(result.relevance_score),  # Use Cohere rerank score
                     similarity=original_result.similarity,  # Keep original similarity
-                    file_name=original_result.file_name,  # Keep original file_name
+                    search_type="cohere_rerank",  # Add search type
                 )
                 reranked_results.append(reranked_result)
 
@@ -272,9 +266,10 @@ class ZillizSearchEngine:
                     text=result.text,
                     speaker=result.speaker,
                     timestamp=result.timestamp,
+                    file_name=result.file_name,
                     score=float(scores[i]),  # Use cross encoder score
                     similarity=result.similarity,  # Keep original similarity
-                    file_name=result.file_name,  # Keep original file_name
+                    search_type="cross_encoder_rerank",  # Add search type
                 )
                 scored_results.append(reranked_result)
 
@@ -309,10 +304,17 @@ class ZillizSearchEngine:
             # Generate query embedding
             query_embedding = self.embedding_model.encode([query])
 
+            # Ensure L2 normalization for cosine similarity
+            import numpy as np
+
+            query_embedding = query_embedding / np.linalg.norm(
+                query_embedding, axis=1, keepdims=True
+            )
+
             # Search parameters
             search_params = {
-                "metric_type": "IP",  # Inner Product
-                "params": {"nprobe": 10},
+                "metric_type": "IP",  # Inner Product (with normalized vectors = cosine similarity)
+                "params": {"nprobe": 20},
             }
 
             # Search for more results initially if reranking is enabled
@@ -342,11 +344,10 @@ class ZillizSearchEngine:
                         text=hit.entity.get("text", ""),
                         speaker=hit.entity.get("speaker", "Unknown"),
                         timestamp=hit.entity.get("timestamp", ""),
+                        file_name=hit.entity.get("file_name", "Unknown"),
                         score=float(hit.score),
                         similarity=float(hit.score),
-                        file_name=hit.entity.get(
-                            "file_name", "Unknown"
-                        ),  # Include file_name
+                        search_type="vector_search",  # Add search type
                     )
                 )
 
@@ -423,9 +424,7 @@ class OpenAIGenerator:
                     - Answer casually in a natural conversational tone
                 """
             else:
-                system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
-                    If the context does not include relevant information, clarify it.
-                    Also, guide the user to correct their mistake if they misunderstood the context.
+                system_prompt = """Answer users' questions by talking about your past experiences.
 
                     Important:
                     Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
@@ -506,7 +505,7 @@ class ChatService:
             # Detect language for response formatting
             original_query = query
             detected_language = detect(query)
-            is_english_input = detected_language == "en"
+            is_english_input = detected_language != "ja"
 
             if is_english_input:
                 logger.info(
