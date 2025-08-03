@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Video Management</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+        background-color: #f5f5f5;
+        color: #333;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 2.5rem;
+        font-weight: 300;
+      }
+
+      .header p {
+        margin: 0.5rem 0 0 0;
+        font-size: 1.1rem;
+        opacity: 0.9;
+      }
+
+      .controls {
+        background: white;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+
+      .search-box {
+        flex: 1;
+        min-width: 300px;
+      }
+
+      .search-box input {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #e1e5e9;
+        border-radius: 6px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+      }
+
+      .search-box input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .filter-buttons {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .btn {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: all 0.3s;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      .btn-primary {
+        background: #667eea;
+        color: white;
+      }
+
+      .btn-secondary {
+        background: #6c757d;
+        color: white;
+      }
+
+      .btn-success {
+        background: #28a745;
+        color: white;
+      }
+
+      .btn-warning {
+        background: #ffc107;
+        color: #212529;
+      }
+
+      .btn-outline {
+        background: transparent;
+        border: 2px solid #667eea;
+        color: #667eea;
+      }
+
+      .btn-outline:hover {
+        background: #667eea;
+        color: white;
+      }
+
+      .btn.active {
+        background: #667eea;
+        color: white;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+      }
+
+      .stat-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        text-align: center;
+      }
+
+      .stat-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #667eea;
+        margin-bottom: 0.5rem;
+      }
+
+      .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .videos-container {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .videos-header {
+        background: #f8f9fa;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #e1e5e9;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .video-item {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #e1e5e9;
+        transition: background-color 0.3s;
+      }
+
+      .video-item:hover {
+        background-color: #f8f9fa;
+      }
+
+      .video-item:last-child {
+        border-bottom: none;
+      }
+
+      .video-title {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: #2c3e50;
+      }
+
+      .video-meta {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.9rem;
+        color: #6c757d;
+        margin-bottom: 0.5rem;
+      }
+
+      .video-description {
+        color: #495057;
+        margin-bottom: 0.5rem;
+        line-height: 1.4;
+      }
+
+      .video-tags {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .tag {
+        background: #e9ecef;
+        color: #495057;
+        padding: 0.25rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+      }
+
+      .tag.transcribed {
+        background: #d4edda;
+        color: #155724;
+      }
+
+      .tag.untranscribed {
+        background: #f8d7da;
+        color: #721c24;
+      }
+
+      .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.5rem;
+        background: #f8f9fa;
+      }
+
+      .page-info {
+        color: #6c757d;
+        font-size: 0.9rem;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 2rem;
+        color: #6c757d;
+      }
+
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        border: 1px solid #f5c6cb;
+      }
+
+      .success {
+        background: #d4edda;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        border: 1px solid #c3e6cb;
+      }
+
+      .youtube-link {
+        color: #dc3545;
+        text-decoration: none;
+        font-weight: 500;
+      }
+
+      .youtube-link:hover {
+        text-decoration: underline;
+      }
+
+      @media (max-width: 768px) {
+        .controls-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .search-box {
+          min-width: 100%;
+        }
+
+        .filter-buttons {
+          justify-content: center;
+        }
+
+        .video-meta {
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>YouTube Video Management</h1>
+        <p>Manage and view YouTube video transcription data</p>
+      </div>
+
+      <div id="stats" class="stats">
+        <!-- Stats will be populated by JavaScript -->
+      </div>
+
+      <div class="controls">
+        <div class="controls-row">
+          <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search videos by title or author..." />
+          </div>
+          <button class="btn btn-primary" onclick="searchVideos()">Search</button>
+          <button class="btn btn-outline" onclick="clearSearch()">Clear</button>
+        </div>
+        <div class="controls-row">
+          <div class="filter-buttons">
+            <button class="btn btn-outline active" id="allBtn" onclick="setFilter('all')">
+              All Videos
+            </button>
+            <button class="btn btn-outline" id="transcribedBtn" onclick="setFilter('transcribed')">
+              Transcribed
+            </button>
+            <button
+              class="btn btn-outline"
+              id="untranscribedBtn"
+              onclick="setFilter('untranscribed')"
+            >
+              Untranscribed
+            </button>
+          </div>
+          <button class="btn btn-secondary" onclick="refreshData()">Refresh</button>
+        </div>
+      </div>
+
+      <div id="error-message" class="error" style="display: none"></div>
+      <div id="success-message" class="success" style="display: none"></div>
+
+      <div class="videos-container">
+        <div class="videos-header">
+          <h3 id="videos-title">All Videos</h3>
+          <span id="video-count" class="page-info">Loading...</span>
+        </div>
+
+        <div id="videos-list">
+          <div class="loading">Loading videos...</div>
+        </div>
+
+        <div id="pagination" class="pagination" style="display: none">
+          <button class="btn btn-outline" id="prevBtn" onclick="previousPage()" disabled>
+            Previous
+          </button>
+          <span id="page-info" class="page-info">Page 1</span>
+          <button class="btn btn-outline" id="nextBtn" onclick="nextPage()" disabled>Next</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Global state
+      let currentFilter = 'all';
+      let currentSearchTerm = '';
+      let currentPage = 1;
+      let nextPageKey = null;
+      let previousPageKeys = [];
+      let isLoading = false;
+
+      // Initialize the page
+      document.addEventListener('DOMContentLoaded', function () {
+        loadStats();
+        loadVideos();
+
+        // Add enter key support for search
+        document.getElementById('searchInput').addEventListener('keypress', function (e) {
+          if (e.key === 'Enter') {
+            searchVideos();
+          }
+        });
+      });
+
+      // API functions
+      async function loadStats() {
+        try {
+          const response = await fetch('/api/stats');
+          const data = await response.json();
+
+          if (response.ok) {
+            displayStats(data.stats);
+          } else {
+            console.error('Failed to load stats:', data.error);
+          }
+        } catch (error) {
+          console.error('Error loading stats:', error);
+        }
+      }
+
+      async function loadVideos(lastKey = null) {
+        if (isLoading) return;
+
+        isLoading = true;
+        showLoading();
+
+        try {
+          let url = '/api/videos?limit=50';
+
+          if (lastKey) {
+            url += `&last_key=${encodeURIComponent(lastKey)}`;
+          }
+
+          if (currentFilter === 'transcribed') {
+            url = '/api/videos/transcribed?limit=50';
+            if (lastKey) url += `&last_key=${encodeURIComponent(lastKey)}`;
+          } else if (currentFilter === 'untranscribed') {
+            url = '/api/videos/untranscribed?limit=50';
+            if (lastKey) url += `&last_key=${encodeURIComponent(lastKey)}`;
+          } else if (currentSearchTerm) {
+            url = `/api/search?q=${encodeURIComponent(currentSearchTerm)}&limit=50`;
+            if (lastKey) url += `&last_key=${encodeURIComponent(lastKey)}`;
+          }
+
+          const response = await fetch(url);
+          const data = await response.json();
+
+          if (response.ok) {
+            displayVideos(data.videos);
+            nextPageKey = data.next_page_key || null;
+            updatePagination(data.videos.length);
+            hideError();
+          } else {
+            showError(data.error);
+          }
+        } catch (error) {
+          showError(`Error loading videos: ${error.message}`);
+        } finally {
+          isLoading = false;
+        }
+      }
+
+      // Display functions
+      function displayStats(stats) {
+        const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-number">${stats.total_videos || 0}</div>
+                    <div class="stat-label">Total Videos</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.transcribed_videos || 0}</div>
+                    <div class="stat-label">Transcribed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.untranscribed_videos || 0}</div>
+                    <div class="stat-label">Untranscribed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${Math.round(
+                      stats.transcription_percentage || 0
+                    )}%</div>
+                    <div class="stat-label">Completion Rate</div>
+                </div>
+            `;
+        document.getElementById('stats').innerHTML = statsHtml;
+      }
+
+      function displayVideos(videos) {
+        const videosList = document.getElementById('videos-list');
+
+        if (!videos || videos.length === 0) {
+          videosList.innerHTML = '<div class="loading">No videos found</div>';
+          document.getElementById('video-count').textContent = '0 videos';
+          return;
+        }
+
+        const videosHtml = videos
+          .map(video => {
+            const transcribedTag = video.transcribed
+              ? '<span class="tag transcribed">Transcribed</span>'
+              : '<span class="tag untranscribed">Not Transcribed</span>';
+
+            const youtubeUrl = `https://www.youtube.com/watch?v=${video.video_id}`;
+            const description = video.description
+              ? video.description.length > 200
+                ? video.description.substring(0, 200) + '...'
+                : video.description
+              : 'No description available';
+
+            return `
+                    <div class="video-item">
+                        <div class="video-title">
+                            <a href="${youtubeUrl}" target="_blank" class="youtube-link">${
+              video.title || 'Untitled'
+            }</a>
+                        </div>
+                        <div class="video-meta">
+                            <span><strong>Author:</strong> ${video.author || 'Unknown'}</span>
+                            <span><strong>Duration:</strong> ${formatDuration(
+                              video.duration
+                            )}</span>
+                            <span><strong>Views:</strong> ${formatNumber(video.views)}</span>
+                            <span><strong>Published:</strong> ${formatDate(video.created_at)}</span>
+                        </div>
+                        <div class="video-description">${description}</div>
+                        <div class="video-tags">
+                            ${transcribedTag}
+                            <span class="tag" style="cursor: pointer; background: #e3f2fd; color: #1976d2; border: 1px solid #1976d2;" 
+                                  onclick="viewTranscription('${video.video_id}')" 
+                                  title="Click to view transcription">
+                                📄 ID: ${video.video_id}
+                            </span>
+                        </div>
+                    </div>
+                `;
+          })
+          .join('');
+
+        videosList.innerHTML = videosHtml;
+        document.getElementById('video-count').textContent = `${videos.length} videos`;
+      }
+
+      function showLoading() {
+        document.getElementById('videos-list').innerHTML =
+          '<div class="loading">Loading videos...</div>';
+        document.getElementById('video-count').textContent = 'Loading...';
+      }
+
+      function showError(message) {
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+        setTimeout(() => {
+          errorDiv.style.display = 'none';
+        }, 5000);
+      }
+
+      function hideError() {
+        document.getElementById('error-message').style.display = 'none';
+      }
+
+      function showSuccess(message) {
+        const successDiv = document.getElementById('success-message');
+        successDiv.textContent = message;
+        successDiv.style.display = 'block';
+        setTimeout(() => {
+          successDiv.style.display = 'none';
+        }, 3000);
+      }
+
+      // Filter and search functions
+      function setFilter(filter) {
+        currentFilter = filter;
+        currentPage = 1;
+        nextPageKey = null;
+        previousPageKeys = [];
+
+        // Update button states
+        document.querySelectorAll('.filter-buttons .btn').forEach(btn => {
+          btn.classList.remove('active');
+        });
+
+        if (filter === 'all') {
+          document.getElementById('allBtn').classList.add('active');
+          document.getElementById('videos-title').textContent = 'All Videos';
+        } else if (filter === 'transcribed') {
+          document.getElementById('transcribedBtn').classList.add('active');
+          document.getElementById('videos-title').textContent = 'Transcribed Videos';
+        } else if (filter === 'untranscribed') {
+          document.getElementById('untranscribedBtn').classList.add('active');
+          document.getElementById('videos-title').textContent = 'Untranscribed Videos';
+        }
+
+        loadVideos();
+      }
+
+      function searchVideos() {
+        const searchTerm = document.getElementById('searchInput').value.trim();
+        currentSearchTerm = searchTerm;
+        currentPage = 1;
+        nextPageKey = null;
+        previousPageKeys = [];
+
+        if (searchTerm) {
+          document.getElementById('videos-title').textContent = `Search Results: "${searchTerm}"`;
+          // Clear filter selection when searching
+          document.querySelectorAll('.filter-buttons .btn').forEach(btn => {
+            btn.classList.remove('active');
+          });
+          currentFilter = 'all';
+        } else {
+          setFilter('all');
+          return;
+        }
+
+        loadVideos();
+      }
+
+      function clearSearch() {
+        document.getElementById('searchInput').value = '';
+        currentSearchTerm = '';
+        setFilter('all');
+      }
+
+      function refreshData() {
+        currentPage = 1;
+        nextPageKey = null;
+        previousPageKeys = [];
+        loadStats();
+        loadVideos();
+        showSuccess('Data refreshed successfully');
+      }
+
+      // Pagination functions
+      function updatePagination(videoCount) {
+        const paginationDiv = document.getElementById('pagination');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const pageInfo = document.getElementById('page-info');
+
+        if (videoCount === 0) {
+          paginationDiv.style.display = 'none';
+          return;
+        }
+
+        paginationDiv.style.display = 'flex';
+
+        // Update buttons
+        prevBtn.disabled = currentPage === 1;
+        nextBtn.disabled = !nextPageKey;
+
+        // Update page info
+        pageInfo.textContent = `Page ${currentPage}`;
+      }
+
+      function nextPage() {
+        if (!nextPageKey || isLoading) return;
+
+        previousPageKeys.push(nextPageKey);
+        currentPage++;
+        loadVideos(nextPageKey);
+      }
+
+      function previousPage() {
+        if (currentPage === 1 || isLoading) return;
+
+        currentPage--;
+        previousPageKeys.pop();
+        const lastKey =
+          previousPageKeys.length > 0 ? previousPageKeys[previousPageKeys.length - 1] : null;
+        loadVideos(lastKey);
+      }
+
+      // Utility functions
+      function formatDuration(duration) {
+        if (!duration) return 'Unknown';
+        // Assuming duration is in format "PT4M13S" or similar
+        return duration.replace('PT', '').replace('M', ':').replace('S', '');
+      }
+
+      function formatNumber(num) {
+        if (!num) return '0';
+        if (num >= 1000000) {
+          return (num / 1000000).toFixed(1) + 'M';
+        } else if (num >= 1000) {
+          return (num / 1000).toFixed(1) + 'K';
+        }
+        return num.toString();
+      }
+
+      function formatDate(dateString) {
+        if (!dateString) return 'Unknown';
+        try {
+          const date = new Date(dateString);
+          return date.toLocaleDateString();
+        } catch {
+          return 'Invalid Date';
+        }
+      }
+
+      // Function to open transcription viewer in new window
+      function viewTranscription(videoId) {
+        const url = `/transcription/${videoId}`;
+        const windowName = `transcription_${videoId}`;
+        const windowFeatures =
+          'width=1000,height=800,scrollbars=yes,resizable=yes,menubar=no,toolbar=no';
+
+        window.open(url, windowName, windowFeatures);
+      }
+    </script>
+  </body>
+</html>
