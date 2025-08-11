@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+
+@layer components {
+  /* Custom component classes */
+  .container-max {
+    @apply max-w-[1200px] mx-auto p-5;
+  }
+  .card {
+    @apply bg-white rounded-lg shadow;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition;
+  }
+  .btn-primary {
+    @apply bg-indigo-500 text-white hover:bg-indigo-600;
+  }
+  .btn-outline {
+    @apply border-2 border-indigo-500 text-indigo-600 hover:bg-indigo-500 hover:text-white;
+  }
+  .btn-secondary {
+    @apply bg-gray-600 text-white hover:bg-gray-700;
+  }
+  .btn-success {
+    @apply bg-green-600 text-white hover:bg-green-700;
+  }
+  .btn-warning {
+    @apply bg-yellow-400 text-gray-900 hover:bg-yellow-500;
+  }
+  .tag {
+    @apply inline-block rounded px-2 py-0.5 text-xs;
+  }
+  .tag-transcribed {
+    @apply bg-green-100 text-green-800;
+  }
+  .tag-untranscribed {
+    @apply bg-red-100 text-red-800;
+  }
+}
