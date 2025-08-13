@@ -101,6 +101,9 @@ export class YouTubeDynamoClient {
     const transcribedCount = transcribed.Count || 0;
     const untranscribed = totalCount - transcribedCount;
     const percent = totalCount ? Math.round((transcribedCount / totalCount) * 1000) / 10 : 0;
+    console.log(
+      `Total videos: ${totalCount}, Transcribed videos: ${transcribedCount}, Untranscribed videos: ${untranscribed}, Transcription percentage: ${percent}%`
+    );
     return {
       total_videos: totalCount,
       transcribed_videos: transcribedCount,
