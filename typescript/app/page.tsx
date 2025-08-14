@@ -55,7 +55,7 @@ export default function HomePage() {
   // API calls
   const loadStats = useCallback(async () => {
     try {
-      const resp = await fetch('/api/stats');
+      const resp = await fetch('/api/stats', { cache: 'no-store' });
       const data = await resp.json();
       if (resp.ok) {
         setStats(data.stats);
@@ -88,7 +88,7 @@ export default function HomePage() {
       setError('');
       try {
         const url = buildVideosUrl(lastKey || undefined);
-        const resp = await fetch(url);
+        const resp = await fetch(url, { cache: 'no-store' });
         const data = await resp.json();
         if (resp.ok) {
           setVideos(data.videos || []);
