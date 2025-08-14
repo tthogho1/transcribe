@@ -374,22 +374,9 @@ export default function HomePage() {
                     <div className="flex flex-wrap gap-2">
                       {transcribedTag}
                       <button
-                        className={`tag border ${
-                          video.transcribed
-                            ? 'bg-blue-50 text-blue-700 border-blue-700 cursor-pointer hover:bg-blue-100'
-                            : 'bg-gray-50 text-gray-400 border-gray-300 cursor-not-allowed'
-                        }`}
-                        title={
-                          video.transcribed
-                            ? 'Click to view transcription'
-                            : 'Transcription not available - video must be transcribed first'
-                        }
-                        onClick={() => {
-                          if (video.transcribed) {
-                            viewTranscription(video.video_id);
-                          }
-                        }}
-                        disabled={!video.transcribed}
+                        className="tag bg-blue-50 text-blue-700 border border-blue-700 cursor-pointer"
+                        title="Click to view transcription"
+                        onClick={() => viewTranscription(video.video_id)}
                       >
                         📄 ID: {video.video_id}
                       </button>
