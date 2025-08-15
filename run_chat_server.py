@@ -184,15 +184,34 @@ def main():
 
         print("=" * 50)
 
-        # Run the server
-        socketio.run(
-            app,
-            host=host,
-            port=port,
-            debug=debug,
-            allow_unsafe_werkzeug=True,
-            use_reloader=False,  # Disable reloader when running as script
-        )
+        # If running in ASGI mode, instruct to run via uvicorn for Python 3.13 compatibility
+        if getattr(socketio, 'async_mode', None) == 'asgi':
+            logger.info("ASGI mode detected. Launching via uvicorn for best compatibility.")
+            try:
+                import uvicorn  # type: ignore
+            except ImportError:
+                logger.error("uvicorn is not installed. Please install it with: pip install uvicorn")
+                sys.exit(1)
+
+            # Import the ASGI app from the Flask-SocketIO instance
+            # Flask-SocketIO exposes an ASGI app via socketio.asgi_app
+            uvicorn.run(
+                socketio.asgi_app,  # ASGI application
+                host=host,
+                port=port,
+                reload=False,
+                log_level="info",
+            )
+        else:
+            # Fallback for other modes
+            socketio.run(
+                app,
+                host=host,
+                port=port,
+                debug=debug,
+                allow_unsafe_werkzeug=True,
+                use_reloader=False,  # Disable reloader when running as script
+            )
 
     except ImportError as e:
         print(f"❌ Import error: {e}")

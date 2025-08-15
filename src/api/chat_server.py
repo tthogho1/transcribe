@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-import openai
+from openai import OpenAI
 from pymilvus import connections, Collection
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from dotenv import load_dotenv
@@ -38,10 +38,10 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+# Use threading mode to avoid eventlet/gevent on Python 3.13
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
-# OpenAI Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# OpenAI client will be initialized in the generator using environment variables
 
 
 @dataclass
@@ -375,7 +375,8 @@ class OpenAIGenerator:
     """OpenAI GPT integration for generating responses"""
 
     def __init__(self):
-        # Note: OpenAI client initialization is handled through openai.api_key
+        # Initialize OpenAI v1 client (reads API key from environment)
+        self.client = OpenAI()
         self.model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
@@ -399,7 +400,7 @@ class OpenAIGenerator:
         """
         try:
             # Prepare context from search results
-            context_parts = []
+            context_parts: List[str] = []
             for i, result in enumerate(search_results, 1):
                 context_parts.append(
                     f"[Context {i}] Speaker: {result.speaker}\n"
@@ -412,7 +413,8 @@ class OpenAIGenerator:
 
             # Create system prompt based on language
             if is_english_input:
-                system_prompt = """Answer and guide the user's questions using context provided by your previous conversations.
+                system_prompt = (
+                    """Answer and guide the user's questions using context provided by your previous conversations.
                     If the context does not include relevant information, clarify it.
                     Also, guide the user to correct their mistake if they misunderstood the context.
 
@@ -422,9 +424,11 @@ class OpenAIGenerator:
                     Guidelines:
                     - Answer in English
                     - Answer casually in a natural conversational tone
-                """
+                    """
+                )
             else:
-                system_prompt = """Answer users' questions by talking about your past experiences.
+                system_prompt = (
+                    """Answer users' questions by talking about your past experiences.
 
                     Important:
                     Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
@@ -432,18 +436,21 @@ class OpenAIGenerator:
                     Guidelines:
                     - Answer in Japanese
                     - Answer casually in the same tone as the related conversation
-                """
+                    """
+                )
 
             # Create user prompt
-            user_prompt = f"""Question: {query}
+            user_prompt = (
+                f"""Question: {query}
 
 Context from relevant conversations:
 {context}
 
 Please provide a helpful answer based on the above context. If the context doesn't contain enough information to answer the question, please say so."""
+            )
 
-            # Generate response
-            response = openai.ChatCompletion.create(
+            # Generate response using OpenAI v1 client
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -463,7 +470,7 @@ Please provide a helpful answer based on the above context. If the context doesn
 
             return {
                 "answer": answer,
-                "tokens_used": response.usage.total_tokens,
+                "tokens_used": getattr(response.usage, "total_tokens", 0),
                 "model": self.model,
             }
 
@@ -654,7 +661,7 @@ def health_check():
                     if chat_service.search_engine.collection
                     else "disconnected"
                 ),
-                "openai": "configured" if openai.api_key else "not configured",
+                "openai": "configured" if bool(os.getenv("OPENAI_API_KEY")) else "not configured",
                 "reranking": {
                     "method": chat_service.search_engine.rerank_method,
                     "cohere": (
