@@ -52,6 +52,11 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Filter change reloading videos
+  useEffect(() => {
+    loadVideos(null);
+  }, [currentFilter]);
+
   // API calls
   const loadStats = useCallback(async () => {
     try {
@@ -114,7 +119,7 @@ export default function HomePage() {
       setPreviousPageKeys([]);
       // When searching, clear the term if user switches filters
       if (currentSearchTerm) setCurrentSearchTerm('');
-      void loadVideos(null);
+      // void loadVideos(null);
     },
     [currentSearchTerm, loadVideos]
   );

@@ -33,17 +33,34 @@ export class YouTubeDynamoClient {
     }
   }
 
+  // ...existing code...
   async getVideos(limit = 50, lastEvaluatedKey?: Record<string, any>, transcribedFilter?: boolean) {
-    const params: any = { TableName: this.tableName, Limit: limit };
-    if (lastEvaluatedKey) params.ExclusiveStartKey = lastEvaluatedKey;
+    const baseParams: any = { TableName: this.tableName };
     if (typeof transcribedFilter === 'boolean') {
-      params.FilterExpression = '#t = :tf';
-      params.ExpressionAttributeNames = { '#t': 'transcribed' };
-      params.ExpressionAttributeValues = { ':tf': transcribedFilter };
+      baseParams.FilterExpression = '#t = :tf';
+      baseParams.ExpressionAttributeNames = { '#t': 'transcribed' };
+      baseParams.ExpressionAttributeValues = { ':tf': transcribedFilter };
     }
-    const resp = await ddb.send(new ScanCommand(params));
-    const items = (resp.Items || []) as VideoRecord[];
-    return { videos: items, last_evaluated_key: resp.LastEvaluatedKey, count: items.length };
+
+    const items: VideoRecord[] = [];
+    let lastKey = lastEvaluatedKey;
+
+    while (items.length < limit) {
+      // 1回あたりの読み取り上限（大きめにして往復回数を削減）
+      const pageLimit = Math.min(1000, Math.max(100, limit - items.length));
+      const params: any = { ...baseParams, Limit: pageLimit };
+      if (lastKey) params.ExclusiveStartKey = lastKey;
+
+      const resp = await ddb.send(new ScanCommand(params));
+      const pageItems = (resp.Items || []) as VideoRecord[];
+      items.push(...pageItems);
+      lastKey = resp.LastEvaluatedKey;
+
+      if (!lastKey) break; // これ以上データなし
+    }
+
+    const sliced = items.slice(0, limit);
+    return { videos: sliced, last_evaluated_key: lastKey, count: sliced.length };
   }
 
   async searchVideos(searchTerm: string, limit = 50, lastEvaluatedKey?: Record<string, any>) {
