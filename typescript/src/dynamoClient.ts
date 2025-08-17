@@ -47,7 +47,8 @@ export class YouTubeDynamoClient {
 
     while (items.length < limit) {
       // 1回あたりの読み取り上限（大きめにして往復回数を削減）
-      const pageLimit = Math.min(1000, Math.max(100, limit - items.length));
+      const pageLimit = Math.min(limit, limit - items.length);
+      // console.log(`get video limit : ${pageLimit}`);
       const params: any = { ...baseParams, Limit: pageLimit };
       if (lastKey) params.ExclusiveStartKey = lastKey;
 
