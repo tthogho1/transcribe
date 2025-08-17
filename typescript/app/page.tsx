@@ -61,6 +61,7 @@ export default function HomePage() {
   const loadStats = useCallback(async () => {
     try {
       const resp = await fetch('/api/stats', { cache: 'no-store' });
+      console.log('Stats response:', resp);
       const data = await resp.json();
       if (resp.ok) {
         setStats(data.stats);
@@ -379,8 +380,14 @@ export default function HomePage() {
                     <div className="flex flex-wrap gap-2">
                       {transcribedTag}
                       <button
-                        className="tag bg-blue-50 text-blue-700 border border-blue-700 cursor-pointer"
+                        className={
+                          'tag border ' +
+                          (video.transcribed
+                            ? 'bg-blue-50 text-blue-700 border-blue-700 cursor-pointer'
+                            : 'bg-gray-200 text-gray-400 border-gray-300 cursor-not-allowed')
+                        }
                         title="Click to view transcription"
+                        disabled={!video.transcribed}
                         onClick={() => viewTranscription(video.video_id)}
                       >
                         📄 ID: {video.video_id}
