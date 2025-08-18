@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
         lastEvaluatedKey = JSON.parse(decoded);
       } catch {}
     }
-    const result = await client.getVideos(limit, lastEvaluatedKey, false);
+    const result = await client.getVideos(limit, lastEvaluatedKey, 0);
     if ((result as any).last_evaluated_key) {
       const encoded = Buffer.from(
         JSON.stringify((result as any).last_evaluated_key),

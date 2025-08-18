@@ -10,7 +10,7 @@ type VideoRecord = {
   views?: number;
   description?: string;
   url?: string;
-  transcribed?: boolean;
+  transcribed?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -24,7 +24,7 @@ type Stats = {
 
 export default function HomePage() {
   // Global state
-  const [currentFilter, setCurrentFilter] = useState<'all' | 'transcribed' | 'untranscribed'>(
+  const [currentFilter, setCurrentFilter] = useState<'all' | '' | 'transcribed' | 'untranscribed'>(
     'all'
   );
   const [currentSearchTerm, setCurrentSearchTerm] = useState<string>('');
@@ -387,7 +387,7 @@ export default function HomePage() {
                             : 'bg-gray-200 text-gray-400 border-gray-300 cursor-not-allowed')
                         }
                         title="Click to view transcription"
-                        disabled={!video.transcribed}
+                        disabled={video.transcribed === 0}
                         onClick={() => viewTranscription(video.video_id)}
                       >
                         📄 ID: {video.video_id}

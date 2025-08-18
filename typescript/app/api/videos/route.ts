@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(String(searchParams.get('limit') || 50), 10) || 50, 100);
     const lastKeyParam = String(searchParams.get('last_key') || '');
     const transcribedParam = searchParams.get('transcribed') || undefined;
+    const videoIdParam = searchParams.get('video_id') || searchParams.get('videoId') || undefined;
     const searchTerm = String(searchParams.get('search') || '').trim();
 
     let lastEvaluatedKey: any = undefined;
@@ -20,16 +21,21 @@ export async function GET(req: NextRequest) {
       } catch {}
     }
 
-    let transcribedFilter: boolean | undefined = undefined;
+    let transcribedFilter: number | undefined = undefined;
     if (typeof transcribedParam === 'string') {
-      transcribedFilter = transcribedParam.toLowerCase() === 'true';
+      transcribedFilter = transcribedParam.toLowerCase() === '1' ? 1 : 0;
     }
 
     let result;
     if (searchTerm) {
       result = await client.searchVideos(searchTerm, limit, lastEvaluatedKey);
     } else {
-      result = await client.getVideos(limit, lastEvaluatedKey, transcribedFilter);
+      result = await client.getVideos(
+        limit,
+        lastEvaluatedKey,
+        transcribedFilter,
+        videoIdParam || (undefined as any)
+      );
     }
 
     if ((result as any).last_evaluated_key) {
@@ -44,6 +50,7 @@ export async function GET(req: NextRequest) {
     (result as any).request_params = {
       limit,
       transcribed_filter: transcribedFilter ?? null,
+      video_id: videoIdParam || null,
       search_term: searchTerm || null,
     };
 
