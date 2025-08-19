@@ -223,9 +223,9 @@ export class YouTubeDynamoClient {
       new ScanCommand({
         TableName: this.tableName,
         Select: 'COUNT',
-        FilterExpression: '#t = :true',
+        FilterExpression: '#t = :one',
         ExpressionAttributeNames: { '#t': 'transcribed' },
-        ExpressionAttributeValues: { ':true': true },
+        ExpressionAttributeValues: { ':one': 1 },
       })
     );
     const totalCount = total.Count || 0;
