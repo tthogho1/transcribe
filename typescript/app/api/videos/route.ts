@@ -30,12 +30,7 @@ export async function GET(req: NextRequest) {
     if (searchTerm) {
       result = await client.searchVideos(searchTerm, limit, lastEvaluatedKey);
     } else {
-      result = await client.getVideos(
-        limit,
-        lastEvaluatedKey,
-        transcribedFilter,
-        videoIdParam || (undefined as any)
-      );
+      result = await client.getVideos(limit, lastEvaluatedKey, transcribedFilter);
     }
 
     if ((result as any).last_evaluated_key) {
