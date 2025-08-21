@@ -164,9 +164,10 @@ def handler(event:, context: nil)
       'views'       => v['views'],
       'description' => v['description'],
       'url'         => v['url'],
-      'transcribed' => false,
+      'transcribed' => 0,
       'created_at'  => v['published_at'] || v['created_at'],
-      'updated_at'  => Time.now.utc.iso8601
+      'updated_at'  => Time.now.utc.iso8601,
+      'FORALL' => 'A'
     }
 
     puts item
