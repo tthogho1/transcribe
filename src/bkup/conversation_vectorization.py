@@ -15,10 +15,10 @@ from pymilvus import (
     DataType,
     AnnSearchRequest,
     RRFRanker,
+    Function,
+    FunctionType,
 )
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-import scipy.sparse as sp
 
 from extract_text_fromS3 import S3JsonTextExtractor
 
@@ -66,15 +66,7 @@ class ConversationVectorizer:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-        # Initialize sparse vectorizer for BM25/TF-IDF
-        self.sparse_vectorizer = TfidfVectorizer(
-            max_features=10000,  # 語彙サイズ制限
-            ngram_range=(1, 2),  # uni-gram and bi-gram
-            min_df=2,  # 最小文書頻度
-            max_df=0.95,  # 最大文書頻度
-            stop_words=None,  # 日本語ストップワードは後で処理
-        )
-
+        # BM25関数を使用するため、sparse_vectorizerは不要
         # 日本語分析器 (MeCabが利用可能な場合)
         try:
             import MeCab
@@ -138,6 +130,19 @@ class ConversationVectorizer:
         schema = CollectionSchema(
             fields, "Collection for conversation chunks with hybrid search"
         )
+
+        # Add BM25 function for automatic sparse vector generation
+        bm25_function = Function(
+            name="text_bm25_emb",  # Function name
+            input_field_names=[
+                "text"
+            ],  # Name of the VARCHAR field containing raw text data
+            output_field_names=[
+                "sparse_vector"
+            ],  # Name of the SPARSE_FLOAT_VECTOR field reserved to store generated embeddings
+            function_type=FunctionType.BM25,
+        )
+        schema.add_function(bm25_function)
 
         # Create collection (drop if exists)
         try:
@@ -228,45 +233,47 @@ class ConversationVectorizer:
             # Simple fallback tokenization
             return text
 
-    def generate_sparse_vectors(self, texts: List[str]) -> sp.csr_matrix:
-        """
-        Generate sparse vectors (BM25/TF-IDF) for texts
-        Args:
-            texts: List of text strings
-        Returns:
-            Sparse matrix
-        """
-        # 日本語テキストの分かち書き
-        tokenized_texts = [self.tokenize_japanese(text) for text in texts]
+    # BM25関数使用時は不要になったメソッド
+    # def generate_sparse_vectors(self, texts: List[str]) -> sp.csr_matrix:
+    #     """
+    #     Generate sparse vectors (BM25/TF-IDF) for texts
+    #     Args:
+    #         texts: List of text strings
+    #     Returns:
+    #         Sparse matrix
+    #     """
+    #     # 日本語テキストの分かち書き
+    #     tokenized_texts = [self.tokenize_japanese(text) for text in texts]
 
-        # TF-IDF/BM25ベクトル生成
-        sparse_vectors = self.sparse_vectorizer.fit_transform(tokenized_texts)
+    #     # TF-IDF/BM25ベクトル生成
+    #     sparse_vectors = self.sparse_vectorizer.fit_transform(tokenized_texts)
 
-        print(f"✅ Generated sparse vectors: {sparse_vectors.shape}")
-        return sparse_vectors
+    #     print(f"✅ Generated sparse vectors: {sparse_vectors.shape}")
+    #     return sparse_vectors
 
-    def sparse_matrix_to_dict(
-        self, sparse_matrix: sp.csr_matrix
-    ) -> List[Dict[int, float]]:
-        """
-        Convert scipy sparse matrix to Zilliz sparse vector format
-        Args:
-            sparse_matrix: Scipy sparse matrix
-        Returns:
-            List of sparse vectors in Zilliz format
-        """
-        sparse_vectors = []
+    # BM25関数使用時は不要になったメソッド
+    # def sparse_matrix_to_dict(
+    #     self, sparse_matrix: sp.csr_matrix
+    # ) -> List[Dict[int, float]]:
+    #     """
+    #     Convert scipy sparse matrix to Zilliz sparse vector format
+    #     Args:
+    #         sparse_matrix: Scipy sparse matrix
+    #     Returns:
+    #         List of sparse vectors in Zilliz format
+    #     """
+    #     sparse_vectors = []
 
-        for i in range(sparse_matrix.shape[0]):
-            row = sparse_matrix.getrow(i)
-            indices = row.indices
-            data = row.data
+    #     for i in range(sparse_matrix.shape[0]):
+    #         row = sparse_matrix.getrow(i)
+    #         indices = row.indices
+    #     data = row.data
 
-            # Zillizのスパースベクトル形式: {index: value}
-            sparse_dict = {int(idx): float(val) for idx, val in zip(indices, data)}
-            sparse_vectors.append(sparse_dict)
+    #         # Zillizのスパースベクトル形式: {index: value}
+    #         sparse_dict = {int(idx): float(val) for idx, val in zip(indices, data)}
+    #         sparse_vectors.append(sparse_dict)
 
-        return sparse_vectors
+    #     return sparse_vectors
 
     def generate_embeddings(
         self, chunks: List[ConversationChunk]
@@ -287,11 +294,14 @@ class ConversationVectorizer:
             dense_embeddings, axis=1, keepdims=True
         )
 
-        # スパースベクトル（BM25/TF-IDF）
-        sparse_matrix = self.generate_sparse_vectors(texts)
-        sparse_embeddings = self.sparse_matrix_to_dict(sparse_matrix)
+        # スパースベクトルはBM25関数が自動生成するため、空のリストを使用
+        sparse_embeddings = (
+            []
+        )  # BM25 function will generate sparse vectors automatically
 
-        print(f"✅ Generated {len(chunks)} dense and sparse embeddings")
+        print(
+            f"✅ Generated {len(chunks)} dense embeddings (sparse vectors auto-generated by BM25 function)"
+        )
         return dense_embeddings, sparse_embeddings
 
     def insert_to_zilliz(
@@ -305,22 +315,37 @@ class ConversationVectorizer:
         Args:
             chunks: List of chunks
             dense_embeddings: Dense embedding vectors
-            sparse_embeddings: Sparse embedding vectors
+            sparse_embeddings: Sparse embedding vectors (not used with BM25 function)
         """
+        # BM25関数使用時はsparse_vectorフィールドを除外（自動生成されるため）
         data = [
             [chunk.id for chunk in chunks],
             dense_embeddings.tolist(),
-            sparse_embeddings,
+            # sparse_vectorフィールドは除外（BM25関数が自動生成）
             [chunk.text for chunk in chunks],
             [chunk.speaker for chunk in chunks],
             [chunk.timestamp for chunk in chunks],
             [chunk.chunk_index for chunk in chunks],
             [chunk.original_length for chunk in chunks],
-            [chunk.file_name for chunk in chunks],  # Include file name
+            [chunk.file_name for chunk in chunks],
+        ]
+
+        # フィールド名もsparse_vectorを除外
+        field_names = [
+            "id",
+            "dense_vector",
+            # "sparse_vector",  # BM25関数が自動生成するため除外
+            "text",
+            "speaker",
+            "timestamp",
+            "chunk_index",
+            "original_length",
+            "file_name",
         ]
 
         try:
-            self.collection.insert(data)
+            # フィールド名を指定してinsert
+            self.collection.insert(data, field_names=field_names)
             print(f"✅ Saved {len(chunks)} chunks with hybrid vectors to Zilliz Cloud")
 
             # デンスベクトル用インデックス
@@ -331,7 +356,7 @@ class ConversationVectorizer:
             }
             self.collection.create_index("dense_vector", dense_index_params)
 
-            # スパースベクトル用インデックス
+            # スパースベクトル用インデックス（BM25関数が自動作成する場合があるが、明示的に作成）
             sparse_index_params = {
                 "index_type": "SPARSE_INVERTED_INDEX",
                 "metric_type": "IP",
@@ -390,10 +415,8 @@ class ConversationVectorizer:
                 dense_query, axis=1, keepdims=True
             )
 
-            # クエリのスパースベクトル生成
-            tokenized_query = self.tokenize_japanese(query)
-            sparse_query_matrix = self.sparse_vectorizer.transform([tokenized_query])
-            sparse_query = self.sparse_matrix_to_dict(sparse_query_matrix)[0]
+            # クエリのスパースベクトル生成 (BM25関数使用時はテキストを直接渡す)
+            # BM25関数が自動的にsparseベクトルを生成するため、手動生成不要
 
             # デンス検索リクエスト
             dense_search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
@@ -404,11 +427,11 @@ class ConversationVectorizer:
                 limit=rerank_k,
             )
 
-            # スパース検索リクエスト
+            # スパース検索リクエスト (BM25関数使用時はクエリテキストを直接渡す)
             sparse_search_params = {"metric_type": "IP", "params": {}}
             sparse_req = AnnSearchRequest(
-                data=[sparse_query],
-                anns_field="sparse_vector",
+                data=[query],  # クエリテキストを直接渡す
+                anns_field="sparse_vector",  # BM25関数が生成したフィールド
                 param=sparse_search_params,
                 limit=rerank_k,
             )

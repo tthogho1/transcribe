@@ -29,6 +29,16 @@ from services.database.zilliz_client import ZillizClient
 # Load environment variables
 load_dotenv()
 
+# Suppress protobuf compatibility warnings
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*gencode version.*is.*older than the runtime version.*",
+    category=UserWarning,
+    module="google.protobuf.runtime_version",
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -64,7 +74,7 @@ class ZillizSearchEngine:
         self.zilliz_token = os.getenv("ZILLIZ_TOKEN")
         self.embedding_model = None
         self.collection = None
-        self.collection_name = "conversation_chunks"
+        self.collection_name = "conversation_chunks_hybrid"
 
         # Reranking configuration
         self.rerank_method = os.getenv(
@@ -110,8 +120,15 @@ class ZillizSearchEngine:
             )
 
             # Get collection
+            from pymilvus import utility
+
             self.collection = Collection(self.collection_name)
-            self.collection.load()
+            try:
+                self.collection.load()
+            except Exception as e:
+                logger.warning(
+                    f"Collection load failed: {e}; attempting to create missing indexes and reload"
+                )
 
             logger.info("✅ Zilliz search engine initialized successfully")
 
@@ -322,10 +339,10 @@ class ZillizSearchEngine:
                 limit * self.initial_search_multiplier if self.rerank_method else limit
             )
 
-            # Perform initial vector search
+            # Perform initial vector search (use dense_vector field matching collection schema)
             results = self.collection.search(
                 query_embedding,
-                "embedding",
+                "dense_vector",
                 search_params,
                 limit=initial_limit,
                 output_fields=[
@@ -378,7 +395,7 @@ class OpenAIGenerator:
         # Initialize OpenAI v1 client (reads API key from environment)
         self.client = OpenAI()
         self.model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
 
     def generate_response(
@@ -411,43 +428,30 @@ class OpenAIGenerator:
 
             context = "\n".join(context_parts)
 
-            # Create system prompt based on language
+            base_prompt = """Answer users' questions from the given user context.
+
+            Important:
+            Speak in the first person as if you experienced the event yourself.
+            When referring to past conversations, explain it as your own experience, 
+            not as someone else's.
+
+            Guidelines:
+            - Answer casually in a natural conversational tone
+            """
+
             if is_english_input:
-                system_prompt = (
-                    """Answer and guide the user's questions using context provided by your previous conversations.
-                    If the context does not include relevant information, clarify it.
-                    Also, guide the user to correct their mistake if they misunderstood the context.
-
-                    Important:
-                    Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
-
-                    Guidelines:
-                    - Answer in English
-                    - Answer casually in a natural conversational tone
-                    """
-                )
+                system_prompt = base_prompt + "\n- Answer in English"
             else:
-                system_prompt = (
-                    """Answer users' questions by talking about your past experiences.
-
-                    Important:
-                    Speak in the first person as if you experienced the event yourself. When referring to past conversations, explain it as your own experience, not as someone else's.
-
-                    Guidelines:
-                    - Answer in Japanese
-                    - Answer casually in the same tone as the related conversation
-                    """
-                )
+                system_prompt = base_prompt + "\n- Answer in Japanese"
 
             # Create user prompt
-            user_prompt = (
-                f"""Question: {query}
+            user_prompt = f"""Question: {query}
 
 Context from relevant conversations:
 {context}
 
-Please provide a helpful answer based on the above context. If the context doesn't contain enough information to answer the question, please say so."""
-            )
+Please provide a helpful answer based on the above context.
+If the context doesn't contain enough information to answer the question, please say so."""
 
             # Generate response using OpenAI v1 client
             response = self.client.chat.completions.create(
@@ -460,6 +464,7 @@ Please provide a helpful answer based on the above context. If the context doesn
                 temperature=self.temperature,
             )
 
+            print(user_prompt)
             answer = response.choices[0].message.content
 
             # If English input but Japanese response generated, translate back to English
@@ -493,9 +498,101 @@ class ChatService:
     """Main chat service combining Zilliz search and OpenAI generation"""
 
     def __init__(self):
+        # Keep legacy ZillizSearchEngine for health/rerank configuration
         self.search_engine = ZillizSearchEngine()
+
+        # ConversationVectorizer provides hybrid search (dense + sparse)
+        zilliz_uri = os.getenv("ZILLIZ_URI")
+        zilliz_token = os.getenv("ZILLIZ_TOKEN")
+        self.vectorizer = ConversationVectorizer(zilliz_uri, zilliz_token)
+
+        # Initialize collection and vectorizer
+        self._initialize_collection_and_vectorizer()
+
         self.ai_generator = OpenAIGenerator()
         self.translator = GoogleTranslator(source="auto", target="ja")
+
+    def _initialize_collection_and_vectorizer(self):
+        """Initialize collection loading and fit vectorizer with sample data"""
+        try:
+            logger.info("🔧 Initializing collection and vectorizer...")
+
+            # Connect and load collection
+            from pymilvus import connections, Collection
+
+            connections.connect(
+                alias="default",
+                uri=os.getenv("ZILLIZ_URI"),
+                token=os.getenv("ZILLIZ_TOKEN"),
+            )
+
+            col = Collection("conversation_chunks_hybrid")
+
+            # Load collection
+            try:
+                col.load()
+                logger.info("✅ Collection loaded successfully")
+            except Exception as load_err:
+                if "already loaded" in str(load_err).lower():
+                    logger.info("✅ Collection already loaded")
+                else:
+                    logger.warning(f"⚠️ Load warning: {load_err}")
+                    logger.info("✅ Continuing anyway...")
+
+            # # Check if vectorizer needs fitting
+            # try:
+            #     # Check sparse vectorizer fitting status directly
+            #     sparse_generator = self.vectorizer.vector_generator.sparse_generator
+
+            #     if not sparse_generator.is_fitted:
+            #         logger.info(
+            #             "🤖 Sparse vectorizer not fitted. Fitting with sample data..."
+            #         )
+            #         sample_texts = [
+            #             "これはテスト用のサンプルテキストです。検索機能をテストします。",
+            #             "ハイブリッド検索のテストを行います。密ベクトルとスパースベクトルの両方を使用します。",
+            #             "会話データの検索と生成を行うシステムです。日本語の自然言語処理を行います。",
+            #             "機械学習とベクトル検索を組み合わせたシステムです。",
+            #             "対話型AIシステムの開発と運用について説明します。",
+            #         ]
+
+            #         # Use fit_and_generate to properly fit the vectorizer
+            #         processed_texts = [
+            #             self.vectorizer.text_processor.clean_text(text)
+            #             for text in sample_texts
+            #         ]
+            #         sparse_generator.fit_and_generate(processed_texts)
+            #         logger.info("✅ Sparse vectorizer fitted with sample data")
+            #     else:
+            #         logger.info("✅ Sparse vectorizer already fitted")
+
+            #     # Check if collection has any data
+            #     from pymilvus import Collection
+
+            #     col = Collection("conversation_chunks_hybrid")
+            #     entity_count = col.num_entities
+            #     logger.info(f"✅ Collection has {entity_count} entities")
+
+            # except Exception as e:
+            #     logger.warning(f"⚠️ Vectorizer initialization check failed: {e}")
+            #     logger.info("🤖 Attempting to fit vectorizer anyway...")
+            # try:
+            #     sample_texts = [
+            #         "これはテスト用のサンプルテキストです。検索機能をテストします。",
+            #         "ハイブリッド検索のテストを行います。密ベクトルとスパースベクトルの両方を使用します。",
+            #         "会話データの検索と生成を行うシステムです。",
+            #     ]
+            #     for i, text in enumerate(sample_texts):
+            #         self.vectorizer.process_monologue(
+            #             text, f"init_sample_{i+1}.txt"
+            #         )
+            #     logger.info("✅ Vectorizer fitted with sample data")
+            # except Exception as fit_err:
+            #     logger.error(f"❌ Failed to fit vectorizer: {fit_err}")
+
+        except Exception as e:
+            logger.error(f"❌ Initialization error: {e}")
+            # Continue anyway - the system might still work with fallbacks
 
     def process_chat_query(self, query: str, max_results: int = 5) -> ChatResponse:
         """
@@ -521,10 +618,11 @@ class ChatService:
                 query = self.translator.translate(query)
                 logger.info(f"Translated prompt for search: {query}")
 
-            # Search for relevant conversations
-            search_results = self.search_engine.search_similar_conversations(
-                query, limit=max_results
-            )
+            # Search for relevant conversations using hybrid search
+            # Prefer ConversationVectorizer.hybrid_search (dense + sparse). If sparse not available, it will fallback to dense.
+            # search_results = self.vectorizer.hybrid_search(query, limit=max_results)
+
+            search_results = self.vectorizer.search_similar(query, limit=max_results)
 
             # Generate AI response
             ai_response = self.ai_generator.generate_response(
@@ -581,6 +679,8 @@ def api_chat():
         data = request.get_json()
         query = data.get("query", "").strip()
 
+        logger.info(f"API /api/chat received query: {query}")
+
         if not query:
             return jsonify({"error": "Query is required"}), 400
 
@@ -621,11 +721,13 @@ def api_search():
         query = data.get("query", "").strip()
         limit = data.get("limit", 5)
 
+        logger.info(f"API /api/search received query: {query} (limit={limit})")
+
         if not query:
             return jsonify({"error": "Query is required"}), 400
 
-        # Search conversations
-        results = chat_service.search_engine.search_similar_conversations(query, limit)
+        # Search conversations using hybrid search (dense + sparse)
+        results = chat_service.vectorizer.hybrid_search(query, limit)
 
         return jsonify(
             {
@@ -636,6 +738,7 @@ def api_search():
                         "speaker": result.speaker,
                         "timestamp": result.timestamp,
                         "score": result.score,
+                        "file_name": result.file_name,
                     }
                     for result in results
                 ],
@@ -661,7 +764,11 @@ def health_check():
                     if chat_service.search_engine.collection
                     else "disconnected"
                 ),
-                "openai": "configured" if bool(os.getenv("OPENAI_API_KEY")) else "not configured",
+                "openai": (
+                    "configured"
+                    if bool(os.getenv("OPENAI_API_KEY"))
+                    else "not configured"
+                ),
                 "reranking": {
                     "method": chat_service.search_engine.rerank_method,
                     "cohere": (

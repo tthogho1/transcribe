@@ -3,7 +3,15 @@ Main conversation vectorizer orchestrating all components
 """
 
 import os
+import sys
 from typing import List, Dict
+
+# Add src directory to Python path when running as standalone script
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.dirname(current_dir)
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
 
 from models.conversation_chunk import ConversationChunk, SearchResult
 from services.processing.text_processor import TextProcessor
@@ -92,7 +100,6 @@ class ConversationVectorizer:
             results = self.zilliz_client.hybrid_search(
                 dense_query, sparse_query, limit, rerank_k
             )
-
             return results
 
         except Exception as e:

@@ -52,15 +52,18 @@ def load_environment():
 
 def configure_logging():
     """Configure logging for the application"""
+    # Remove any existing handlers so this configuration always takes effect
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        root_logger.handlers.clear()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-    # Set specific loggers to reduce noise
+    # Set specific loggers to reduce noise while keeping our app logs visible
     logging.getLogger("werkzeug").setLevel(logging.WARNING)  # Reduce Flask noise
     logging.getLogger("engineio").setLevel(logging.WARNING)  # Reduce SocketIO noise
     logging.getLogger("socketio").setLevel(logging.WARNING)  # Reduce SocketIO noise
@@ -117,11 +120,6 @@ def main():
     project_root = setup_python_path()
     load_environment()
     configure_logging()
-
-    # Check requirements
-    if not check_requirements():
-        print("❌ Requirements check failed. Exiting.")
-        sys.exit(1)
 
     try:
         # Import after setting up the path
@@ -185,12 +183,16 @@ def main():
         print("=" * 50)
 
         # If running in ASGI mode, instruct to run via uvicorn for Python 3.13 compatibility
-        if getattr(socketio, 'async_mode', None) == 'asgi':
-            logger.info("ASGI mode detected. Launching via uvicorn for best compatibility.")
+        if getattr(socketio, "async_mode", None) == "asgi":
+            logger.info(
+                "ASGI mode detected. Launching via uvicorn for best compatibility."
+            )
             try:
                 import uvicorn  # type: ignore
             except ImportError:
-                logger.error("uvicorn is not installed. Please install it with: pip install uvicorn")
+                logger.error(
+                    "uvicorn is not installed. Please install it with: pip install uvicorn"
+                )
                 sys.exit(1)
 
             # Import the ASGI app from the Flask-SocketIO instance

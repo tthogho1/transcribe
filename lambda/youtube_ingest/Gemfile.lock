@@ -48,6 +48,7 @@ PLATFORMS
 
 DEPENDENCIES
   aws-sdk-dynamodb (~> 1.150)
+  bigdecimal
   debug (~> 1.11)
 
 BUNDLED WITH
