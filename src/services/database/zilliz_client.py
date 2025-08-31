@@ -52,41 +52,57 @@ class ZillizClient:
             raise
 
     def _setup_collection(self):
-        """Set up collection with hybrid search support"""
-        # Define field schema
-        fields = [
-            FieldSchema(
-                name="id", dtype=DataType.VARCHAR, max_length=100, is_primary=True
-            ),
-            # Dense vector (semantic embeddings)
-            FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=768),
-            # Sparse vector (BM25/TF-IDF)
-            FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
-            FieldSchema(name="speaker", dtype=DataType.VARCHAR, max_length=100),
-            FieldSchema(name="timestamp", dtype=DataType.VARCHAR, max_length=50),
-            FieldSchema(name="chunk_index", dtype=DataType.INT64),
-            FieldSchema(name="original_length", dtype=DataType.INT64),
-            FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=255),
-        ]
-
-        schema = CollectionSchema(
-            fields, "Collection for conversation chunks with hybrid search"
-        )
-
-        # Create collection (drop if exists)
+        """Use existing collection with hybrid search support"""
         try:
             from pymilvus import utility
 
-            if utility.has_collection(self.collection_name):
-                utility.drop_collection(self.collection_name)
+            # Check if collection exists
+            if not utility.has_collection(self.collection_name):
+                raise Exception(
+                    f"❌ Collection '{self.collection_name}' does not exist. Please create it first."
+                )
 
-            self.collection = Collection(self.collection_name, schema)
-            print(
-                f"✅ Created collection '{self.collection_name}' with hybrid search support"
-            )
+            # Connect to existing collection
+            self.collection = Collection(self.collection_name)
+            print(f"✅ Connected to existing collection '{self.collection_name}'")
+
+            # Verify required indexes exist
+            self._verify_required_indexes()
+
+            # Try to load collection
+            try:
+                self.collection.load()
+                print("✅ Collection loaded successfully")
+            except Exception as load_err:
+                if "already loaded" in str(load_err).lower():
+                    print("✅ Collection already loaded")
+                else:
+                    print(f"⚠️ Collection load warning: {load_err}")
+
         except Exception as e:
-            print(f"❌ Collection creation error: {e}")
+            print(f"❌ Collection setup error: {e}")
+            raise
+
+    def _verify_required_indexes(self):
+        """Verify that required indexes exist"""
+        try:
+            indexes = self.collection.indexes
+            existing_fields = [idx.field_name for idx in indexes] if indexes else []
+
+            required_indexes = ["dense_vector", "sparse_vector"]
+            missing_indexes = [
+                field for field in required_indexes if field not in existing_fields
+            ]
+
+            if missing_indexes:
+                raise Exception(
+                    f"❌ Required indexes missing: {missing_indexes}. Please create them first."
+                )
+
+            print(f"✅ All required indexes exist: {existing_fields}")
+
+        except Exception as e:
+            print(f"❌ Index verification error: {e}")
             raise
 
     def insert_data(self, chunks: List[ConversationChunk], embeddings: EmbeddingResult):
@@ -118,6 +134,30 @@ class ZillizClient:
             print(f"❌ Data insertion error: {e}")
             raise
 
+    def _create_indexes_for_empty_collection(self):
+        """Create indexes for empty collection (called during setup)"""
+        try:
+            # Dense vector index
+            dense_index_params = {
+                "metric_type": "IP",  # Inner Product
+                "index_type": "FLAT",  # Use FLAT for empty collections
+            }
+            self.collection.create_index("dense_vector", dense_index_params)
+
+            # Sparse vector index
+            sparse_index_params = {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "IP",
+            }
+            self.collection.create_index("sparse_vector", sparse_index_params)
+
+            self.collection.load()
+            print("✅ Created initial indexes for empty collection")
+
+        except Exception as e:
+            print(f"❌ Initial index creation error: {e}")
+            # Don't raise - continue without indexes (they can be created later)
+
     def _create_indexes(self):
         """Create indexes for both dense and sparse vectors"""
         try:
@@ -146,7 +186,7 @@ class ZillizClient:
     def hybrid_search(
         self,
         dense_query: np.ndarray,
-        sparse_query: Dict[int, float],
+        sparse_query: Dict[int, float],  # BM25 search requires sparse vector dict
         limit: int = 5,
         rerank_k: int = 100,
     ) -> List[SearchResult]:
@@ -154,7 +194,7 @@ class ZillizClient:
         Perform hybrid search using both dense and sparse vectors
         Args:
             dense_query: Dense query vector
-            sparse_query: Sparse query vector
+            sparse_query: Sparse query vector dict for BM25 search
             limit: Number of final results
             rerank_k: Number of candidates for reranking
         Returns:
@@ -170,11 +210,11 @@ class ZillizClient:
                 limit=rerank_k,
             )
 
-            # Sparse search request
+            # Sparse search request (BM25関数使用時はクエリテキストを直接渡す)
             sparse_search_params = {"metric_type": "IP", "params": {}}
             sparse_req = AnnSearchRequest(
-                data=[sparse_query],
-                anns_field="sparse_vector",
+                data=[sparse_query],  # クエリテキストを直接渡す
+                anns_field="sparse_vector",  # BM25関数が生成したフィールド
                 param=sparse_search_params,
                 limit=rerank_k,
             )
@@ -184,7 +224,7 @@ class ZillizClient:
 
             results = self.collection.hybrid_search(
                 reqs=[dense_req, sparse_req],
-                ranker=ranker,
+                rerank=ranker,
                 limit=limit,
                 output_fields=["text", "speaker", "timestamp", "file_name"],
             )
@@ -198,6 +238,7 @@ class ZillizClient:
                         timestamp=hit.entity.get("timestamp", ""),
                         file_name=hit.entity.get("file_name", ""),
                         score=hit.score,
+                        similarity=hit.score,  # Use score as similarity for now
                         search_type="hybrid",
                     )
                 )
@@ -240,6 +281,7 @@ class ZillizClient:
                         timestamp=hit.entity.get("timestamp", ""),
                         file_name=hit.entity.get("file_name", ""),
                         score=hit.score,
+                        similarity=hit.score,  # Use score as similarity for now
                         search_type="dense",
                     )
                 )
@@ -257,14 +299,49 @@ class ZillizClient:
             Dictionary containing collection statistics
         """
         try:
-            stats = self.collection.describe()
-            num_entities = self.collection.num_entities
+            # Basic stats
+            try:
+                stats = self.collection.describe()
+            except Exception:
+                stats = None
+
+            try:
+                num_entities = self.collection.num_entities
+            except Exception:
+                try:
+                    num_entities = self.collection.num_entities()
+                except Exception:
+                    num_entities = None
+
+            # is_loaded indicator
+            try:
+                is_loaded = getattr(self.collection, "is_loaded", None)
+            except Exception:
+                is_loaded = None
+
+            # Index list (use utility.list_indexes where possible to avoid AmbiguousIndexName)
+            index_list = []
+            try:
+                from pymilvus import utility
+
+                try:
+                    index_list = utility.list_indexes(self.collection_name)
+                except Exception:
+                    # Fallback to get_index_info or empty
+                    try:
+                        info = utility.get_index_info(self.collection_name)
+                        index_list = info if info is not None else []
+                    except Exception:
+                        index_list = []
+            except Exception:
+                index_list = []
 
             return {
                 "collection_name": self.collection_name,
                 "schema": stats,
                 "num_entities": num_entities,
-                "is_loaded": self.collection.has_index(),
+                "is_loaded": is_loaded,
+                "indexes": index_list,
             }
         except Exception as e:
             print(f"❌ Error getting collection stats: {e}")
