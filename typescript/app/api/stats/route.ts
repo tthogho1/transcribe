@@ -4,6 +4,8 @@ import { YouTubeDynamoClient } from '../../../src/dynamoClient';
 const tableName = process.env.YOUTUBE_DYNAMODB_TABLE || 'youtube_videos';
 const client = new YouTubeDynamoClient(tableName);
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     console.log('Fetching video statistics');
