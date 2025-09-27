@@ -4,6 +4,7 @@ Main conversation vectorizer orchestrating all components
 
 import os
 import sys
+import numpy as np
 from typing import List, Dict
 
 # Add src directory to Python path when running as standalone script
@@ -16,6 +17,7 @@ if __name__ == "__main__":
 from models.conversation_chunk import ConversationChunk, SearchResult
 from services.processing.text_processor import TextProcessor
 from services.processing.vector_generator import HybridVectorGenerator
+from services.processing.tfidf_vectorizer import TfidfSparseVectorizer
 from services.database.zilliz_client import ZillizClient
 from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
@@ -47,11 +49,30 @@ class ConversationVectorizer:
             collection_name: Zilliz collection name
         """
         # Initialize components
+        print("🔧 Initializing TextProcessor...")
         self.text_processor = TextProcessor(chunk_size, chunk_overlap)
+        print("✅ TextProcessor initialized")
+
+        print("🔧 Initializing HybridVectorGenerator...")
         self.vector_generator = HybridVectorGenerator(
             dense_model=embedding_model, tokenizer=self.text_processor
         )
+        print("✅ HybridVectorGenerator initialized")
+
+        print("🔧 Initializing ZillizClient...")
         self.zilliz_client = ZillizClient(zilliz_uri, zilliz_token, collection_name)
+        print("✅ ZillizClient initialized")
+
+        # Initialize TF-IDF sparse vectorizer
+        print("🔧 Initializing TfidfSparseVectorizer...")
+        self.sparse_vectorizer = TfidfSparseVectorizer(
+            max_features=10000,
+            ngram_range=(1, 2),
+            min_df=1,
+            max_df=0.95,
+            use_mecab=True,  # Re-enable to see detailed error
+        )
+        print("✅ TfidfSparseVectorizer initialized")
 
         print("✅ ConversationVectorizer initialized with all components")
 
@@ -69,10 +90,27 @@ class ConversationVectorizer:
         # 1. Process text into chunks
         chunks = self.text_processor.process_text(text, file_name)
 
-        # 2. Generate embeddings
-        embeddings = self.vector_generator.generate_embeddings(chunks)
+        # 2. Generate dense embeddings
+        dense_embeddings = self.vector_generator.dense_generator.generate(
+            [chunk.text for chunk in chunks]
+        )
 
-        # 3. Insert into Zilliz
+        # 3. Generate sparse embeddings using TF-IDF
+        texts = [chunk.text for chunk in chunks]
+        if not self.sparse_vectorizer.is_fitted:
+            sparse_embeddings = self.sparse_vectorizer.fit_transform(texts)
+        else:
+            sparse_embeddings = self.sparse_vectorizer.transform(texts)
+
+        # 4. Create embeddings result
+        from models.conversation_chunk import EmbeddingResult
+
+        embeddings = EmbeddingResult(
+            dense_embeddings=dense_embeddings,
+            sparse_embeddings=sparse_embeddings,
+        )
+
+        # 5. Insert into Zilliz
         self.zilliz_client.insert_data(chunks, embeddings)
 
         print("🎉 Hybrid processing completed!")
@@ -91,10 +129,13 @@ class ConversationVectorizer:
             List of search results
         """
         try:
-            # Generate query embeddings
-            dense_query, sparse_query = self.vector_generator.generate_query_embeddings(
-                query
+            # Generate dense query embedding
+            dense_query = (
+                self.vector_generator.dense_generator.generate_query_embedding(query)
             )
+
+            # Generate sparse query embedding using TF-IDF
+            sparse_query = self.sparse_vectorizer.transform([query])[0]
 
             # Perform hybrid search
             results = self.zilliz_client.hybrid_search(
@@ -164,13 +205,17 @@ def main():
     zilliz_token = os.getenv("ZILLIZ_TOKEN", "your-zilliz-token")
 
     try:
-        # Initialize vectorizer
+        # Initialize vectorizer with detailed debugging
+        print("🔧 Initializing ConversationVectorizer...")
+
+        print("🔧 Step 1: Creating ConversationVectorizer instance...")
         vectorizer = ConversationVectorizer(
             zilliz_uri,
             zilliz_token,
             chunk_size=200,
             chunk_overlap=40,
         )
+        print("✅ ConversationVectorizer initialized successfully!")
 
         # Process files
         for json_file_key in json_files:

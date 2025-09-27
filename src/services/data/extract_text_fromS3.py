@@ -62,7 +62,7 @@ class S3JsonTextExtractor:
         self, transcribe_data: Dict
     ) -> Optional[str]:
         """
-        Amazon Transcribeの結果JSONからテキストを抽出
+        Transcribeの結果JSONからテキストを抽出
 
         Args:
             transcribe_data: Transcribeの結果JSON
@@ -73,12 +73,12 @@ class S3JsonTextExtractor:
         try:
             # Transcribeの結果構造からテキストを抽出
             if (
-                "results" in transcribe_data
-                and "transcripts" in transcribe_data["results"]
+                "result" in transcribe_data
+                and "transcription" in transcribe_data["result"]
             ):
-                transcripts = transcribe_data["results"]["transcripts"]
+                transcripts = transcribe_data["result"]["transcription"]
                 if transcripts and len(transcripts) > 0:
-                    full_text = transcripts[0].get("transcript", "")
+                    full_text = transcripts.get("full_transcript", "")
                     logger.info(
                         f"Transcribeテキストを抽出しました: {len(full_text)} 文字"
                     )
@@ -179,9 +179,9 @@ class S3JsonTextExtractor:
 
         if extraction_type == "auto":
             # 自動判定: Transcribeの結果かどうかチェック
-            if "results" in json_data and "transcripts" in json_data.get("results", {}):
+            if "result" in json_data and "transcription" in json_data.get("result", {}):
                 extraction_type = "transcribe"
-                logger.info("Amazon Transcribeの結果JSONと判定しました")
+                logger.info("Transcribeの結果JSONと判定しました")
             else:
                 extraction_type = "generic"
                 logger.info("汎用JSONと判定しました")

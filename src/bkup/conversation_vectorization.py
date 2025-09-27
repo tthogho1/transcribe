@@ -66,17 +66,6 @@ class ConversationVectorizer:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-        # BM25関数を使用するため、sparse_vectorizerは不要
-        # 日本語分析器 (MeCabが利用可能な場合)
-        try:
-            import MeCab
-
-            self.mecab = MeCab.Tagger("-Owakati")
-            print("✅ MeCab tokenizer initialized")
-        except ImportError:
-            print("⚠️ MeCab not available, using default tokenization")
-            self.mecab = None
-
         # Initialize simple character-based text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,  # Maximum chunk size
@@ -132,17 +121,17 @@ class ConversationVectorizer:
         )
 
         # Add BM25 function for automatic sparse vector generation
-        bm25_function = Function(
-            name="text_bm25_emb",  # Function name
-            input_field_names=[
-                "text"
-            ],  # Name of the VARCHAR field containing raw text data
-            output_field_names=[
-                "sparse_vector"
-            ],  # Name of the SPARSE_FLOAT_VECTOR field reserved to store generated embeddings
-            function_type=FunctionType.BM25,
-        )
-        schema.add_function(bm25_function)
+        # bm25_function = Function(
+        #     name="text_bm25_emb",  # Function name
+        #     input_field_names=[
+        #         "text"
+        #     ],  # Name of the VARCHAR field containing raw text data
+        #     output_field_names=[
+        #         "sparse_vector"
+        #     ],  # Name of the SPARSE_FLOAT_VECTOR field reserved to store generated embeddings
+        #     function_type=FunctionType.BM25,
+        # )
+        # schema.add_function(bm25_function)
 
         # Create collection (drop if exists)
         try:
@@ -322,6 +311,7 @@ class ConversationVectorizer:
             [chunk.id for chunk in chunks],
             dense_embeddings.tolist(),
             # sparse_vectorフィールドは除外（BM25関数が自動生成）
+            sparse_embeddings.tolist(),
             [chunk.text for chunk in chunks],
             [chunk.speaker for chunk in chunks],
             [chunk.timestamp for chunk in chunks],
@@ -334,7 +324,7 @@ class ConversationVectorizer:
         field_names = [
             "id",
             "dense_vector",
-            # "sparse_vector",  # BM25関数が自動生成するため除外
+            "sparse_vector",  # BM25関数が自動生成するため除外
             "text",
             "speaker",
             "timestamp",
@@ -359,7 +349,7 @@ class ConversationVectorizer:
             # スパースベクトル用インデックス（BM25関数が自動作成する場合があるが、明示的に作成）
             sparse_index_params = {
                 "index_type": "SPARSE_INVERTED_INDEX",
-                "metric_type": "IP",
+                "metric_type": "BM25",
             }
             self.collection.create_index("sparse_vector", sparse_index_params)
 
@@ -511,7 +501,7 @@ class ConversationVectorizer:
 
 # Usage example
 def main():
-
+    print("🚀 Starting Conversation Vectorizer...")
     extractor = S3JsonTextExtractor()
 
     bucket_name = os.getenv("S3_BUCKET_NAME")
