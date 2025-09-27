@@ -55,6 +55,19 @@ class VideoRecord:
     @classmethod
     def from_dynamodb_item(cls, item: Dict[str, Any]) -> "VideoRecord":
         """Create VideoRecord from DynamoDB item"""
+
+        # Helper function to parse datetime from string or return datetime object
+        def parse_datetime(value):
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value)
+                except ValueError:
+                    return datetime.now()
+            elif isinstance(value, datetime):
+                return value
+            else:
+                return datetime.now()
+
         return cls(
             video_id=item.get("video_id", ""),
             title=item.get("title", ""),
@@ -63,9 +76,11 @@ class VideoRecord:
             views=int(item.get("views", 0)),
             description=item.get("description", ""),
             url=item.get("url", ""),
-            transcribed=bool(item.get("transcribed", False)),
-            created_at=item.get("created_at", datetime.now()),
-            updated_at=item.get("updated_at", datetime.now()),
+            transcribed=bool(
+                int(item.get("transcribed", 0))
+            ),  # Convert number to boolean
+            created_at=parse_datetime(item.get("created_at", datetime.now())),
+            updated_at=parse_datetime(item.get("updated_at", datetime.now())),
         )
 
 
@@ -273,7 +288,7 @@ class YouTubeDynamoDBClient:
     def create_video(self, video_data: Dict[str, Any]) -> Optional[VideoRecord]:
         """Create a new video record"""
         try:
-            now = datetime.now()
+            now = datetime.now().isoformat()
             video_data["created_at"] = now
             video_data["updated_at"] = now
 
@@ -289,13 +304,16 @@ class YouTubeDynamoDBClient:
     ) -> Optional[VideoRecord]:
         """Update an existing video record"""
         try:
-            update_data["updated_at"] = datetime.now()
+            update_data["updated_at"] = datetime.now().isoformat()
 
             # Build update expression
             update_expression = "SET "
             expression_attribute_values = {}
 
             for key, value in update_data.items():
+                # Convert datetime objects to ISO format strings for DynamoDB
+                if isinstance(value, datetime):
+                    value = value.isoformat()
                 update_expression += f"#{key} = :{key}, "
                 expression_attribute_values[f":{key}"] = value
 
@@ -317,6 +335,36 @@ class YouTubeDynamoDBClient:
         except ClientError as e:
             self.logger.error(f"Error updating video {video_id}: {e}")
             return None
+
+    def update_transcribed_status(self, video_id: str, transcribed: bool) -> bool:
+        """
+        Update transcribed status for a video
+
+        Args:
+            video_id: ビデオID
+            transcribed: transcribe状態 (True/False)
+
+        Returns:
+            更新成功時True、失敗時False
+        """
+        try:
+            # Convert boolean to number for DynamoDB GSI compatibility (0 = false, 1 = true)
+            transcribed_value = 1 if transcribed else 0
+            result = self.update_video(video_id, {"transcribed": transcribed_value})
+            if result:
+                self.logger.debug(
+                    f"Video {video_id} transcribed status updated to {transcribed}"
+                )
+                return True
+            else:
+                self.logger.warning(
+                    f"Failed to update transcribed status for video {video_id}"
+                )
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error updating transcribed status for {video_id}: {e}")
+            return False
 
     def delete_video(self, video_id: str) -> bool:
         """Delete a video record"""

@@ -12,20 +12,29 @@ from models.conversation_chunk import ConversationChunk
 class JapaneseTokenizer:
     """Japanese text tokenizer using MeCab"""
 
-    def __init__(self):
+    def __init__(self, enable_mecab: bool = False):
         """Initialize MeCab tokenizer"""
         self.mecab = None
-        self._initialize_mecab()
+        if enable_mecab:
+            self._initialize_mecab()
+        else:
+            print("ℹ️ [JapaneseTokenizer] MeCab disabled ")
 
     def _initialize_mecab(self):
         """Initialize MeCab if available"""
         try:
             import MeCab
 
+            print("🔧 [JapaneseTokenizer] Initializing MeCab...")
             self.mecab = MeCab.Tagger("-Owakati")
-            print("✅ MeCab tokenizer initialized")
+            print("✅ [JapaneseTokenizer] MeCab tokenizer initialized")
         except ImportError:
-            print("⚠️ MeCab not available, using default tokenization")
+            print(
+                "⚠️ [JapaneseTokenizer] MeCab not available, using default tokenization"
+            )
+        except Exception as e:
+            print(f"❌ [JapaneseTokenizer] MeCab initialization failed: {e}")
+            self.mecab = None
 
     def tokenize(self, text: str) -> str:
         """
@@ -138,7 +147,9 @@ class TextProcessor:
             chunk_size: Maximum chunk size in characters
             chunk_overlap: Overlap size in characters
         """
-        self.tokenizer = JapaneseTokenizer()
+        self.tokenizer = JapaneseTokenizer(
+            enable_mecab=False
+        )  # Disable MeCab in JapaneseTokenizer
         self.chunker = TextChunker(chunk_size, chunk_overlap)
 
     def process_text(self, text: str, file_name: str) -> List[ConversationChunk]:

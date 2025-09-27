@@ -52,22 +52,28 @@ class ZillizClient:
             raise
 
     def _setup_collection(self):
-        """Use existing collection with hybrid search support"""
+        """Setup collection with hybrid search support - create if doesn't exist"""
         try:
             from pymilvus import utility
 
             # Check if collection exists
             if not utility.has_collection(self.collection_name):
-                raise Exception(
-                    f"❌ Collection '{self.collection_name}' does not exist. Please create it first."
+                print(
+                    f"⚠️ Collection '{self.collection_name}' does not exist. Creating it..."
                 )
+                self._create_collection()
+            else:
+                # Connect to existing collection
+                self.collection = Collection(self.collection_name)
+                print(f"✅ Connected to existing collection '{self.collection_name}'")
 
-            # Connect to existing collection
-            self.collection = Collection(self.collection_name)
-            print(f"✅ Connected to existing collection '{self.collection_name}'")
-
-            # Verify required indexes exist
-            self._verify_required_indexes()
+            # Verify required indexes exist (for existing collections)
+            if utility.has_collection(self.collection_name):
+                try:
+                    self._verify_required_indexes()
+                except Exception as idx_err:
+                    print(f"⚠️ Index verification failed: {idx_err}")
+                    print("💡 This is normal for newly created collections")
 
             # Try to load collection
             try:
@@ -81,6 +87,59 @@ class ZillizClient:
 
         except Exception as e:
             print(f"❌ Collection setup error: {e}")
+            raise
+
+    def _create_collection(self):
+        """Create new collection with hybrid search schema"""
+        try:
+            print(
+                f"🔨 Creating collection '{self.collection_name}' with hybrid search schema..."
+            )
+
+            # Define schema fields
+            fields = [
+                FieldSchema(
+                    name="id", dtype=DataType.VARCHAR, max_length=500, is_primary=True
+                ),
+                FieldSchema(
+                    name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=768
+                ),  # SentenceTransformer embedding dimension
+                FieldSchema(
+                    name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR
+                ),  # TF-IDF sparse vector
+                FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
+                FieldSchema(name="speaker", dtype=DataType.VARCHAR, max_length=500),
+                FieldSchema(name="timestamp", dtype=DataType.VARCHAR, max_length=50),
+                FieldSchema(name="chunk_index", dtype=DataType.INT64),
+                FieldSchema(name="original_length", dtype=DataType.INT64),
+                FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=500),
+            ]
+
+            # Create schema
+            schema = CollectionSchema(
+                fields=fields,
+                description="Conversation chunks with hybrid (dense + sparse) vectors for Japanese text",
+            )
+
+            # Create collection
+            self.collection = Collection(
+                name=self.collection_name, schema=schema, using="default"
+            )
+
+            print(f"✅ Collection '{self.collection_name}' created successfully")
+            print("📋 Schema:")
+            print(f"   - id: Primary key (VARCHAR)")
+            print(f"   - dense_vector: SentenceTransformer embeddings (768D)")
+            print(f"   - sparse_vector: TF-IDF sparse vectors")
+            print(
+                f"   - text, speaker, timestamp, chunk_index, original_length, file_name"
+            )
+
+            # Create initial indexes for empty collection
+            self._create_indexes_for_empty_collection()
+
+        except Exception as e:
+            print(f"❌ Collection creation error: {e}")
             raise
 
     def _verify_required_indexes(self):
@@ -128,7 +187,8 @@ class ZillizClient:
             self.collection.insert(data)
             print(f"✅ Inserted {len(chunks)} chunks with hybrid vectors")
 
-            self._create_indexes()
+            # Only create indexes if they don't exist yet
+            self._create_indexes_if_needed()
 
         except Exception as e:
             print(f"❌ Data insertion error: {e}")
@@ -137,12 +197,15 @@ class ZillizClient:
     def _create_indexes_for_empty_collection(self):
         """Create indexes for empty collection (called during setup)"""
         try:
-            # Dense vector index
+            print("🔧 Creating initial indexes for empty collection...")
+
+            # Dense vector index - use FLAT for small collections
             dense_index_params = {
-                "metric_type": "IP",  # Inner Product
-                "index_type": "FLAT",  # Use FLAT for empty collections
+                "metric_type": "IP",  # Inner Product for cosine similarity
+                "index_type": "FLAT",  # Simple flat index for new collections
             }
             self.collection.create_index("dense_vector", dense_index_params)
+            print("   ✅ Dense vector index created (FLAT/IP)")
 
             # Sparse vector index
             sparse_index_params = {
@@ -150,13 +213,62 @@ class ZillizClient:
                 "metric_type": "IP",
             }
             self.collection.create_index("sparse_vector", sparse_index_params)
+            print("   ✅ Sparse vector index created (SPARSE_INVERTED_INDEX/IP)")
 
+            # Load collection
             self.collection.load()
-            print("✅ Created initial indexes for empty collection")
+            print("✅ Created initial indexes and loaded collection")
 
         except Exception as e:
             print(f"❌ Initial index creation error: {e}")
+            print("💡 Indexes can be created later when data is inserted")
             # Don't raise - continue without indexes (they can be created later)
+
+    def _create_indexes_if_needed(self):
+        """Create indexes only if they don't exist yet"""
+        try:
+            # Check existing indexes
+            indexes = self.collection.indexes
+            existing_fields = [idx.field_name for idx in indexes] if indexes else []
+
+            # Dense vector index
+            if "dense_vector" not in existing_fields:
+                print("🔧 Creating dense vector index...")
+                dense_index_params = {
+                    "metric_type": "IP",  # Inner Product
+                    "index_type": "IVF_FLAT",
+                    "params": {"nlist": 128},
+                }
+                self.collection.create_index("dense_vector", dense_index_params)
+                print("   ✅ Dense vector index created")
+            else:
+                print("   ✅ Dense vector index already exists")
+
+            # Sparse vector index
+            if "sparse_vector" not in existing_fields:
+                print("🔧 Creating sparse vector index...")
+                sparse_index_params = {
+                    "index_type": "SPARSE_INVERTED_INDEX",
+                    "metric_type": "IP",
+                }
+                self.collection.create_index("sparse_vector", sparse_index_params)
+                print("   ✅ Sparse vector index created")
+            else:
+                print("   ✅ Sparse vector index already exists")
+
+            # Load collection if not loaded
+            try:
+                self.collection.load()
+                print("✅ Collection loaded after index update")
+            except Exception as load_err:
+                if "already loaded" in str(load_err).lower():
+                    print("✅ Collection already loaded")
+                else:
+                    print(f"⚠️ Load warning: {load_err}")
+
+        except Exception as e:
+            print(f"❌ Index update error: {e}")
+            # Don't raise - data insertion was successful
 
     def _create_indexes(self):
         """Create indexes for both dense and sparse vectors"""
@@ -186,7 +298,7 @@ class ZillizClient:
     def hybrid_search(
         self,
         dense_query: np.ndarray,
-        sparse_query: Dict[int, float],  # BM25 search requires sparse vector dict
+        sparse_query: Dict[str, float],
         limit: int = 5,
         rerank_k: int = 100,
     ) -> List[SearchResult]:
@@ -194,7 +306,7 @@ class ZillizClient:
         Perform hybrid search using both dense and sparse vectors
         Args:
             dense_query: Dense query vector
-            sparse_query: Sparse query vector dict for BM25 search
+            sparse_query: Sparse query vector dict from JapaneseSparseVectorizer
             limit: Number of final results
             rerank_k: Number of candidates for reranking
         Returns:
@@ -210,11 +322,11 @@ class ZillizClient:
                 limit=rerank_k,
             )
 
-            # Sparse search request (BM25関数使用時はクエリテキストを直接渡す)
+            # Sparse search request (Using JapaneseSparseVectorizer generated vectors)
             sparse_search_params = {"metric_type": "IP", "params": {}}
             sparse_req = AnnSearchRequest(
-                data=[sparse_query],  # クエリテキストを直接渡す
-                anns_field="sparse_vector",  # BM25関数が生成したフィールド
+                data=[sparse_query],  # JapaneseSparseVectorizer generated sparse vector
+                anns_field="sparse_vector",  # Sparse vector field
                 param=sparse_search_params,
                 limit=rerank_k,
             )

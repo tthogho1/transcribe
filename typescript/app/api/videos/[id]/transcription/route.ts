@@ -8,7 +8,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   try {
     if (!bucket)
       return NextResponse.json({ error: 'S3 configuration not available' }, { status: 500 });
-    const key = `${params.id}.json`;
+    // const key = `${params.id}.json`;
+    const key = `${params.id}_transcription.json`;
     const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     const body = await (out.Body as any).transformToString();
     return NextResponse.json({

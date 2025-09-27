@@ -620,9 +620,10 @@ class ChatService:
 
             # Search for relevant conversations using hybrid search
             # Prefer ConversationVectorizer.hybrid_search (dense + sparse). If sparse not available, it will fallback to dense.
-            # search_results = self.vectorizer.hybrid_search(query, limit=max_results)
 
-            search_results = self.vectorizer.search_similar(query, limit=max_results)
+            search_results = self.vectorizer.hybrid_search(query, limit=max_results)
+
+            # search_results = self.vectorizer.search_similar(query, limit=max_results)
 
             # Generate AI response
             ai_response = self.ai_generator.generate_response(
