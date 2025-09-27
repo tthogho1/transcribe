@@ -43,7 +43,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   } catch (error) {
     console.error('Download error:', error);
 
-    if ((error as AWS.AWSError).code === 'NoSuchKey') {
+    // AWS SDK v3のエラーハンドリング
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'NoSuchKey') {
       return NextResponse.json({ error: 'Transcription file not found' }, { status: 404 });
     }
 
