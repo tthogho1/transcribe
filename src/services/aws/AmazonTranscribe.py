@@ -3,6 +3,10 @@ import logging
 import os
 import json
 from dotenv import load_dotenv
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from services.database.youtube_dynamodb_client import YoutubeDynamoDBClient
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -23,6 +27,9 @@ transcribe = boto3.client(
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     region_name=os.getenv("AWS_REGION"),
 )
+
+# DynamoDBクライアント初期化
+dynamodb_client = YoutubeDynamoDBClient()
 
 # SQSからメッセージ受信し、Transcribeジョブを実行
 logger.info("SQS URL : " + os.getenv("SQS_QUEUE_URL"))
@@ -60,6 +67,36 @@ while True:
             OutputBucketName=os.getenv("TRANSCRIBE_OUTPUT_BUCKET", "audio4output"),
         )
         logger.info(f"Transcription job started: {file_id}")
+
+        # ジョブの完了を監視
+        logger.info(f"Monitoring transcription job: {file_id}")
+        while True:
+            job_status = transcribe.get_transcription_job(TranscriptionJobName=file_id)
+            status = job_status["TranscriptionJob"]["TranscriptionJobStatus"]
+
+            if status == "COMPLETED":
+                logger.info(f"Transcription job completed: {file_id}")
+                # DynamoDBのtranscribedフラグを1に更新
+                success = dynamodb_client.update_transcribed_status(file_id, True)
+                if success:
+                    logger.info(
+                        f"DynamoDB transcribed flag updated to 1 for video: {file_id}"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to update DynamoDB transcribed flag for video: {file_id}"
+                    )
+                break
+            elif status == "FAILED":
+                logger.error(f"Transcription job failed: {file_id}")
+                # 失敗時はフラグを0のまま残す（更新しない）
+                break
+            else:
+                logger.info(f"Transcription job status: {status}. Waiting...")
+                import time
+
+                time.sleep(30)  # 30秒待機
+
     except Exception as e:
         logger.error(f"Failed to start transcription job for {file_id}: {e}")
 

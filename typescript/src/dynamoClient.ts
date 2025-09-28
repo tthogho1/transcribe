@@ -133,18 +133,56 @@ export class YouTubeDynamoClient {
         ExpressionAttributeValues: { ':one': 1 },
       })
     );
+
+    // embedding属性のカウントを取得
+    const embeddingTrue = await ddb.send(
+      new ScanCommand({
+        TableName: this.tableName,
+        Select: 'COUNT',
+        FilterExpression: '#e = :true',
+        ExpressionAttributeNames: { '#e': 'embedding' },
+        ExpressionAttributeValues: { ':true': true },
+      })
+    );
+
+    const embeddingFalse = await ddb.send(
+      new ScanCommand({
+        TableName: this.tableName,
+        Select: 'COUNT',
+        FilterExpression: '#e = :false',
+        ExpressionAttributeNames: { '#e': 'embedding' },
+        ExpressionAttributeValues: { ':false': false },
+      })
+    );
+
     const totalCount = total.Count || 0;
     const transcribedCount = transcribed.Count || 0;
     const untranscribed = totalCount - transcribedCount;
     const percent = totalCount ? Math.round((transcribedCount / totalCount) * 1000) / 10 : 0;
+
+    const embeddingTrueCount = embeddingTrue.Count || 0;
+    const embeddingFalseCount = embeddingFalse.Count || 0;
+    const embeddingTotalCount = embeddingTrueCount + embeddingFalseCount;
+    const embeddingPercent = totalCount
+      ? Math.round((embeddingTrueCount / totalCount) * 1000) / 10
+      : 0;
+
     console.log(
       `Total videos: ${totalCount}, Transcribed videos: ${transcribedCount}, Untranscribed videos: ${untranscribed}, Transcription percentage: ${percent}%`
     );
+    console.log(
+      `Embedding True: ${embeddingTrueCount}, Embedding False: ${embeddingFalseCount}, Embedding Total: ${embeddingTotalCount}, Embedding percentage: ${embeddingPercent}%`
+    );
+
     return {
       total_videos: totalCount,
       transcribed_videos: transcribedCount,
       untranscribed_videos: untranscribed,
       transcription_percentage: percent,
+      embedding_true: embeddingTrueCount,
+      embedding_false: embeddingFalseCount,
+      embedding_total: embeddingTotalCount,
+      embedding_percentage: embeddingPercent,
     };
   }
 }
