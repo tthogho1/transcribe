@@ -20,6 +20,10 @@ type Stats = {
   transcribed_videos: number;
   untranscribed_videos: number;
   transcription_percentage: number;
+  embedding_true?: number;
+  embedding_false?: number;
+  embedding_total?: number;
+  embedding_percentage?: number;
 };
 
 export default function HomePage() {
@@ -214,36 +218,82 @@ export default function HomePage() {
         </div>
 
         {/* Stats */}
-        <div id="stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {stats ? (
+        <div id="stats" className="mb-8">
+          {/* Transcription Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {stats ? (
+              <>
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-indigo-500 mb-2">
+                    {stats.total_videos || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">Total Videos</div>
+                </div>
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-indigo-500 mb-2">
+                    {stats.transcribed_videos || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">Transcribed</div>
+                </div>
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-indigo-500 mb-2">
+                    {stats.untranscribed_videos || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">Untranscribed</div>
+                </div>
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-indigo-500 mb-2">
+                    {Math.round(stats.transcription_percentage || 0)}%
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">
+                    Completion Rate
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="card p-6 text-center col-span-full">Loading stats...</div>
+            )}
+          </div>
+
+          {/* Embedding Stats */}
+          {stats && (stats.embedding_true !== undefined || stats.embedding_false !== undefined) && (
             <>
-              <div className="card p-6 text-center">
-                <div className="text-3xl font-bold text-indigo-500 mb-2">
-                  {stats.total_videos || 0}
+              <h3 className="text-lg font-semibold text-gray-700 mb-4">🧠 Embedding Statistics</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-blue-500 mb-2">
+                    {stats.embedding_total || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">
+                    Embedding Total
+                  </div>
                 </div>
-                <div className="text-gray-500 text-sm uppercase tracking-wide">Total Videos</div>
-              </div>
-              <div className="card p-6 text-center">
-                <div className="text-3xl font-bold text-indigo-500 mb-2">
-                  {stats.transcribed_videos || 0}
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-green-500 mb-2">
+                    {stats.embedding_true || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">
+                    Embedding True
+                  </div>
                 </div>
-                <div className="text-gray-500 text-sm uppercase tracking-wide">Transcribed</div>
-              </div>
-              <div className="card p-6 text-center">
-                <div className="text-3xl font-bold text-indigo-500 mb-2">
-                  {stats.untranscribed_videos || 0}
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-orange-500 mb-2">
+                    {stats.embedding_false || 0}
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">
+                    Embedding False
+                  </div>
                 </div>
-                <div className="text-gray-500 text-sm uppercase tracking-wide">Untranscribed</div>
-              </div>
-              <div className="card p-6 text-center">
-                <div className="text-3xl font-bold text-indigo-500 mb-2">
-                  {Math.round(stats.transcription_percentage || 0)}%
+                <div className="card p-6 text-center">
+                  <div className="text-3xl font-bold text-purple-500 mb-2">
+                    {Math.round(stats.embedding_percentage || 0)}%
+                  </div>
+                  <div className="text-gray-500 text-sm uppercase tracking-wide">
+                    Embedding Rate
+                  </div>
                 </div>
-                <div className="text-gray-500 text-sm uppercase tracking-wide">Completion Rate</div>
               </div>
             </>
-          ) : (
-            <div className="card p-6 text-center col-span-full">Loading stats...</div>
           )}
         </div>
 
