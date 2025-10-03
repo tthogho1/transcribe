@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import EditableArea from '../_components/EditableArea';
+import TranscriptionPageClient from './_components/TranscriptionPageClient';
 
 async function fetchTranscription(id: string): Promise<string | null> {
   // サーバーサイドfetchは絶対パス推奨
@@ -47,24 +48,5 @@ export default async function TranscriptionPage({ params }: { params: { id: stri
     console.log('found');
   }
 
-  return (
-    <div className="container-max">
-      <div className="flex items-center justify-between py-6">
-        <h1 className="text-2xl font-semibold">Transcription Editor</h1>
-        <a
-          href={`https://www.youtube.com/watch?v=${id}`}
-          target="_blank"
-          rel="noreferrer"
-          className="btn btn-outline"
-        >
-          Open YouTube
-        </a>
-      </div>
-
-      <div className="card p-4">
-        <div className="mb-3 text-sm text-gray-500">Video ID: {id}</div>
-        <EditableArea id={id} initialValue={transcription} />
-      </div>
-    </div>
-  );
+  return <TranscriptionPageClient id={id} transcription={transcription} />;
 }
