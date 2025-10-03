@@ -301,66 +301,173 @@ class ZillizClient:
         sparse_query: Dict[str, float],
         limit: int = 5,
         rerank_k: int = 100,
+        alpha: float = 0.5,
     ) -> List[SearchResult]:
         """
-        Perform hybrid search using both dense and sparse vectors
-        Args:
-            dense_query: Dense query vector
-            sparse_query: Sparse query vector dict from JapaneseSparseVectorizer
-            limit: Number of final results
-            rerank_k: Number of candidates for reranking
-        Returns:
-            List of search results
+        Perform hybrid search by independently searching dense and sparse,
+        then fusing with Reciprocal Rank Fusion (RRF).
+        - dense: weight alpha, sparse: weight (1-alpha)
         """
         try:
-            # Dense search request
-            dense_search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
-            dense_req = AnnSearchRequest(
-                data=[dense_query[0].tolist()],
-                anns_field="dense_vector",
-                param=dense_search_params,
-                limit=rerank_k,
-            )
+            if self.collection is None:
+                print("❌ Hybrid search error: collection is not initialized")
+                return []
 
-            # Sparse search request (Using JapaneseSparseVectorizer generated vectors)
-            sparse_search_params = {"metric_type": "IP", "params": {}}
-            sparse_req = AnnSearchRequest(
-                data=[sparse_query],  # JapaneseSparseVectorizer generated sparse vector
-                anns_field="sparse_vector",  # Sparse vector field
-                param=sparse_search_params,
-                limit=rerank_k,
-            )
+            # Ensure parameters
+            alpha = min(max(alpha, 0.0), 1.0)
+            k = max(limit, rerank_k)
 
-            # RRF (Reciprocal Rank Fusion) ranking
-            ranker = RRFRanker()
+            out_fields = [
+                "text",
+                "speaker",
+                "timestamp",
+                "file_name",
+                "chunk_index",
+                "original_length",
+            ]
 
-            results = self.collection.hybrid_search(
-                reqs=[dense_req, sparse_req],
-                rerank=ranker,
-                limit=limit,
-                output_fields=["text", "speaker", "timestamp", "file_name"],
-            )
+            # Dense phase
+            dense_params = {"metric_type": "IP", "params": {"nprobe": 16}}
+            dense_hits = []
+            try:
+                dres = self.collection.search(
+                    dense_query,
+                    "dense_vector",
+                    dense_params,
+                    limit=k,
+                    output_fields=out_fields,
+                )
+                if dres and dres[0]:
+                    dense_hits = list(dres[0])
+            except Exception as de:
+                print(f"⚠️ Dense phase failed in hybrid: {de}")
 
-            search_results = []
-            for hit in results[0]:
-                search_results.append(
-                    SearchResult(
-                        text=hit.entity.get("text", ""),
-                        speaker=hit.entity.get("speaker", ""),
-                        timestamp=hit.entity.get("timestamp", ""),
-                        file_name=hit.entity.get("file_name", ""),
-                        score=hit.score,
-                        similarity=hit.score,  # Use score as similarity for now
-                        search_type="hybrid",
-                    )
+            # Sparse phase
+            sparse_params = {"metric_type": "IP", "params": {}}
+            sparse_hits = []
+            try:
+                sres = self.collection.search(
+                    [sparse_query],
+                    "sparse_vector",
+                    sparse_params,
+                    limit=k,
+                    output_fields=out_fields,
+                )
+                if sres and sres[0]:
+                    sparse_hits = list(sres[0])
+            except Exception as se:
+                print(f"⚠️ Sparse phase failed in hybrid: {se}")
+
+            # If only one side available, return it
+            if not dense_hits and not sparse_hits:
+                return []
+            if dense_hits and not sparse_hits:
+                return [
+                    self._to_search_result(h, "hybrid[dense-only]")
+                    for h in dense_hits[:limit]
+                ]
+            if sparse_hits and not dense_hits:
+                return [
+                    self._to_search_result(h, "hybrid[sparse-only]")
+                    for h in sparse_hits[:limit]
+                ]
+
+            # Build rank maps (1-based ranks)
+            def rank_map(hits):
+                m = {}
+                for i, h in enumerate(hits, start=1):
+                    try:
+                        key = h.id
+                    except Exception:
+                        # Fallback if .id isn't available
+                        try:
+                            key = h.entity.get("id")
+                        except Exception:
+                            key = str(i)
+                    m[key] = i
+                return m
+
+            r_dense = rank_map(dense_hits)
+            r_sparse = rank_map(sparse_hits)
+
+            # RRF fusion
+            K = 60.0
+            candidates = set(r_dense.keys()) | set(r_sparse.keys())
+            fused = {}
+            for cid in candidates:
+                s = 0.0
+                rd = r_dense.get(cid)
+                rs = r_sparse.get(cid)
+                if rd is not None:
+                    s += alpha * (1.0 / (K + rd))
+                if rs is not None:
+                    s += (1.0 - alpha) * (1.0 / (K + rs))
+                fused[cid] = s
+
+            # Map id -> hit
+            hit_by_id = {}
+            for h in dense_hits:
+                try:
+                    hit_by_id[h.id] = h
+                except Exception:
+                    pass
+            for h in sparse_hits:
+                try:
+                    if h.id not in hit_by_id:
+                        hit_by_id[h.id] = h
+                except Exception:
+                    pass
+
+            # Sort and take top limit
+            top_ids = sorted(fused.keys(), key=lambda x: fused[x], reverse=True)[:limit]
+            results: List[SearchResult] = []
+            for cid in top_ids:
+                h = hit_by_id.get(cid)
+                if h is None:
+                    continue
+                results.append(
+                    self._to_search_result(h, "hybrid", override_score=fused[cid])
                 )
 
-            print(f"✅ Hybrid search returned {len(search_results)} results")
-            return search_results
+            return results
 
         except Exception as e:
             print(f"❌ Hybrid search error: {e}")
-            raise
+            return []
+
+    def _to_search_result(
+        self, hit, search_type: str, override_score: float | None = None
+    ) -> SearchResult:
+        """Convert Milvus hit to SearchResult with safe fallbacks."""
+        try:
+            text = hit.entity.get("text", "")
+        except Exception:
+            try:
+                text = hit.get("text", "")
+            except Exception:
+                text = ""
+        try:
+            speaker = hit.entity.get("speaker", "")
+            timestamp = hit.entity.get("timestamp", "")
+            file_name = hit.entity.get("file_name", "")
+        except Exception:
+            speaker = timestamp = file_name = ""
+
+        score = (
+            float(override_score)
+            if override_score is not None
+            else float(getattr(hit, "score", 0.0))
+        )
+
+        return SearchResult(
+            text=text,
+            speaker=speaker,
+            timestamp=timestamp,
+            file_name=file_name,
+            score=score,
+            similarity=score,
+            search_type=search_type,
+        )
 
     def dense_search(
         self, dense_query: np.ndarray, limit: int = 5

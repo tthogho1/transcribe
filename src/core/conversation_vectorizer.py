@@ -21,9 +21,10 @@ from services.processing.tfidf_vectorizer import TfidfSparseVectorizer
 from services.database.zilliz_client import ZillizClient
 from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+# Load .env from project root (robust in various run contexts)
+load_dotenv(find_dotenv(usecwd=True))
 
 
 class ConversationVectorizer:
@@ -73,6 +74,22 @@ class ConversationVectorizer:
             use_mecab=True,  # Re-enable to see detailed error
         )
         print("✅ TfidfSparseVectorizer initialized")
+
+        # Try to load a pre-fitted TF-IDF model if specified
+        tfidf_model_path = os.getenv("TFIDF_MODEL_PATH")
+        if tfidf_model_path and os.path.exists(tfidf_model_path):
+            try:
+                self.sparse_vectorizer = TfidfSparseVectorizer.load_sklearn(
+                    tfidf_model_path,
+                    max_features=10000,
+                    ngram_range=(1, 2),
+                    min_df=1,
+                    max_df=0.95,
+                    use_mecab=True,
+                )
+                print(f"💾 Loaded TF-IDF model from: {tfidf_model_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to load TF-IDF model ({tfidf_model_path}): {e}")
 
         print("✅ ConversationVectorizer initialized with all components")
 
@@ -134,7 +151,10 @@ class ConversationVectorizer:
                 self.vector_generator.dense_generator.generate_query_embedding(query)
             )
 
-            # Generate sparse query embedding using TF-IDF
+            # Generate sparse query embedding using TF-IDF (fallback to dense if not fitted)
+            if not getattr(self.sparse_vectorizer, "is_fitted", False):
+                print("ℹ️ TF-IDF not fitted. Falling back to dense search.")
+                return self.search_similar(query, limit)
             sparse_query = self.sparse_vectorizer.transform([query])[0]
 
             # Perform hybrid search
@@ -187,7 +207,8 @@ class ConversationVectorizer:
             },
             "vector_generator": {
                 "dense_model": self.vector_generator.dense_generator.model_name,
-                "sparse_fitted": self.vector_generator.sparse_generator.is_fitted,
+                # Reflect TF-IDF vectorizer fitted status
+                "sparse_fitted": getattr(self.sparse_vectorizer, "is_fitted", False),
             },
         }
 

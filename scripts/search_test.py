@@ -28,6 +28,7 @@ def main():
         print("❌ Please set ZILLIZ_URI and ZILLIZ_TOKEN environment variables")
         return
 
+    query = "殴られたときに誉れでございます。を使いますか？"
     try:
         # Initialize vectorizer
         print("🔧 Initializing ConversationVectorizer...")
@@ -41,7 +42,7 @@ def main():
         # Test searches
         print("\n🔍 Hybrid Search test:")
         try:
-            hybrid_results = vectorizer.hybrid_search("仕事の楽しみ方", limit=3)
+            hybrid_results = vectorizer.hybrid_search(query, limit=3)
             if hybrid_results:
                 for i, result in enumerate(hybrid_results, 1):
                     print(
@@ -54,7 +55,7 @@ def main():
 
         print("\n🔍 Dense Search test:")
         try:
-            dense_results = vectorizer.search_similar("仕事の楽しみ方", limit=3)
+            dense_results = vectorizer.search_similar(query, limit=3)
             if dense_results:
                 for i, result in enumerate(dense_results, 1):
                     print(
@@ -64,6 +65,34 @@ def main():
                 print("  No results found")
         except Exception as e:
             print(f"  ❌ Dense search failed: {e}")
+
+        # --- Sparse-only search (TF-IDF) ---
+        print("\n🔍 Sparse (TF-IDF only) Search test:")
+        try:
+            # Get the sparse vectorizer and Zilliz collection
+            sparse_vec = vectorizer.sparse_vectorizer
+            col = vectorizer.zilliz_client.collection
+            # Transform query to sparse vector
+            sparse_query = sparse_vec.transform([query])[0]
+            # Prepare search params
+            search_params = {"metric_type": "IP", "params": {}}
+            # Run search
+            results = col.search(
+                [sparse_query],
+                "sparse_vector",
+                search_params,
+                limit=3,
+                output_fields=["text", "speaker", "timestamp", "file_name"],
+            )
+            if results and results[0]:
+                for i, hit in enumerate(results[0], 1):
+                    text = hit.entity.get("text", "")
+                    score = hit.score
+                    print(f"{i}. [sparse] {text[:100]}... (Score: {score:.3f})")
+            else:
+                print("  No results found")
+        except Exception as e:
+            print(f"  ❌ Sparse search failed: {e}")
 
         # Show vectorizer stats
         print("\n📊 Vectorizer Stats:")

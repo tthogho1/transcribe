@@ -6,6 +6,11 @@ import re
 import numpy as np
 import os
 from typing import List, Dict
+
+try:
+    import joblib  # for model persistence
+except Exception:
+    joblib = None
 from sklearn.feature_extraction.text import TfidfVectorizer
 from dotenv import load_dotenv
 
@@ -109,6 +114,40 @@ class TfidfSparseVectorizer:
         self.is_fitted = False
         print("✅ TfidfSparseVectorizer initialized")
 
+    # -------------------- Persistence helpers (pickling-safe) --------------------
+    def save_sklearn(self, path: str) -> None:
+        """Save only the underlying scikit-learn TfidfVectorizer safely.
+
+        The MeCab/fugashi Tagger and bound tokenizer are not picklable.
+        We temporarily remove the tokenizer to persist vocabulary/IDF/etc.
+        """
+        if joblib is None:
+            raise RuntimeError("joblib is required for saving. pip install joblib")
+        vec = self.vectorizer
+        # Temporarily drop tokenizer (bound method is not picklable)
+        original_tokenizer = getattr(vec, "tokenizer", None)
+        try:
+            vec.tokenizer = None
+            joblib.dump(vec, path)
+        finally:
+            vec.tokenizer = original_tokenizer
+
+    @classmethod
+    def load_sklearn(cls, path: str, **init_kwargs):
+        """Load a previously saved sklearn TfidfVectorizer and wrap it.
+
+        Rebind tokenizer based on use_mecab flag of the created instance.
+        """
+        if joblib is None:
+            raise RuntimeError("joblib is required for loading. pip install joblib")
+        loaded_vec = joblib.load(path)
+        inst = cls(**init_kwargs)
+        inst.vectorizer = loaded_vec
+        # Rebind tokenizer after loading
+        inst.vectorizer.tokenizer = inst._tokenize_japanese if inst.use_mecab else None
+        inst.is_fitted = True
+        return inst
+
     def _tokenize_japanese(self, text: str) -> List[str]:
         """Tokenize Japanese text using MeCab with UniDic"""
         if not self.mecab:
@@ -166,7 +205,7 @@ class TfidfSparseVectorizer:
     def transform(self, texts: List[str]) -> List[Dict[int, float]]:
         """Transform texts to sparse vectors"""
         if not self.is_fitted:
-            print("⚠️ TF-IDF vectorizer not fitted")
+            print("⚠️ ")
             return []
 
         try:
