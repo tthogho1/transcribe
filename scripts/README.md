@@ -4,6 +4,92 @@
 
 ## スクリプト一覧
 
+### `generate_embeddings_with_vectorizer.py`
+
+**目的**: DynamoDB で `embedding=false` の動画を対象に、S3 から転写 JSON を取得し、`ConversationVectorizer` を使ってエンベディングを生成・Zilliz に保存し、DynamoDB のフラグを更新します。
+
+**機能**:
+
+- DynamoDB から `embedding` が未設定/false の `video_id` を抽出
+- S3 から `{video_id}_transcription.json` をダウンロード
+- AWS Transcribe / Gladia 形式の JSON からテキストを抽出
+- `ConversationVectorizer.process_monologue` でベクトル化し Zilliz Cloud に保存
+- DynamoDB の `embedding` フラグと `embedding_updated_at` を更新
+- ドライランモード・バッチサイズ指定・ログレベル指定に対応
+
+**使用方法**:
+
+```bash
+# 1. 環境変数を確認
+python scripts/generate_embeddings_with_vectorizer.py --dry-run --batch-size 3
+
+# 2. 実際に 5 件処理
+python scripts/generate_embeddings_with_vectorizer.py --batch-size 5
+
+# 3. デバッグログを有効化
+python scripts/generate_embeddings_with_vectorizer.py --log-level DEBUG
+```
+
+**必要な環境変数**:
+
+- `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- `DYNAMO_TABLE_NAME`
+- `S3_TRANSCRIPT_BUCKET` または `S3_BUCKET_NAME`
+- `ZILLIZ_URI`, `ZILLIZ_TOKEN`
+
+### `fit_tfidf_from_s3.py`
+
+目的: S3 上の転写 JSON ファイル群からテキストを収集し、`TfidfSparseVectorizer` をコーパス全体で fit して、joblib で保存します。
+
+機能:
+
+- `S3JsonTextExtractor` で JSON からテキスト抽出 (AWS Transcribe / Gladia / 汎用)
+- `TextProcessor` でチャンク分割
+- `TfidfSparseVectorizer.fit_transform` で語彙を学習し、`joblib.dump` で保存
+- バケット/プレフィックス/最大ファイル数/チャンク設定/ログレベルの指定
+
+使用例 (PowerShell):
+
+```
+# 環境変数を使う場合
+$env:S3_BUCKET_NAME = "your-bucket"
+$env:S3_TRANSCRIPT_PREFIX = "transcripts/"   # 任意
+$env:TFIDF_MODEL_PATH = "artifacts/tfidf_vectorizer.joblib"  # 任意
+python scripts/fit_tfidf_from_s3.py
+
+# 直接引数で指定
+python scripts/fit_tfidf_from_s3.py --bucket your-bucket --prefix transcripts/ --model-path artifacts/tfidf_vectorizer.joblib --chunk-size 300 --chunk-overlap 50 --max-files 0 --log-level INFO
+```
+
+注意:
+
+- `joblib` が必要です (`pip install joblib`)
+- モデルファイルには `TfidfSparseVectorizer` のインスタンスが保存されます
+- 既存サービス側で `joblib.load` により読み込み、`transform` に利用できます
+
+### `rebuild_sparse_vectors.py`
+
+目的: 保存済み TF‑IDF モデル（`.env: TFIDF_MODEL_PATH`）を読み込み、Zilliz Cloud コレクション内の全レコードの `text` から `sparse_vector` を再計算し、上書きします。
+
+前提:
+
+- `.env` に `ZILLIZ_URI`, `ZILLIZ_TOKEN`, `TFIDF_MODEL_PATH` が設定されていること
+- コレクション名は `ZILLIZ_COLLECTION`（未設定時は `conversation_chunks_hybrid`）
+
+使用例 (PowerShell):
+
+```
+python scripts/rebuild_sparse_vectors.py
+```
+
+オプション:
+
+- `SPARSE_REBUILD_BATCH` バッチサイズ（デフォルト 500）
+
+注意:
+
+- 環境によっては `query_iterator` か `offset` が使用できない場合があります。エラーが出た場合は PyMilvus/サーバーのバージョン更新をご検討ください。
+
 ### `add_embedding_attribute.py`
 
 **目的**: DynamoDB テーブル内の全項目に新規属性`embedding`を追加
