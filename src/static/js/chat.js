@@ -89,7 +89,8 @@ class ChatInterface {
       const youtubeURL = 'https://www.youtube.com/watch?v=';
       html += `<br><span class="related">Related:</span><br>`;
       related.forEach(item => {
-        const youtubeId = item.replace(/\.json$/, '');
+        // const youtubeId = item.replace(/\.json$/, '');
+        const youtubeId = item.replace(/(_transcription)?\.json$/, '');
         html += `<a href="${youtubeURL + youtubeId}" class="related-item">${
           youtubeURL + youtubeId
         }</a><br>`;

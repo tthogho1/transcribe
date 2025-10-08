@@ -165,6 +165,7 @@ def handler(event:, context: nil)
       'description' => v['description'],
       'url'         => v['url'],
       'transcribed' => 0,
+      'embedding'   => false,
       'created_at'  => v['published_at'] || v['created_at'],
       'updated_at'  => Time.now.utc.iso8601,
       'FORALL' => 'A'

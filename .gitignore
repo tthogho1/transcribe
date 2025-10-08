@@ -243,3 +243,16 @@ datasets/
 test_results/
 experiments/
 outputs/
+
+# ---------------------------------------------------------------------------
+# Lambda / serverless artifacts (do NOT commit build outputs & local tooling)
+# ---------------------------------------------------------------------------
+lambda/**/vendor/
+lambda/**/.bundle/
+lambda/**/lambda.zip
+lambda/**/.ruby-lsp/
+lambda/**/.vscode/
+lambda/**/.env
+
+# NOTE: Keep Gemfile & Gemfile.lock under lambda functions versioned
+# (so DO NOT add Gemfile.lock to ignore list) to ensure reproducible builds.
