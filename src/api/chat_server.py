@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from openai import OpenAI
@@ -683,35 +683,43 @@ def api_chat():
         logger.info(f"API /api/chat received query: {query}")
 
         if not query:
-            return jsonify({"error": "Query is required"}), 400
+            return Response(
+                json.dumps({"error": "Query is required"}, ensure_ascii=False),
+                mimetype="application/json",
+                status=400,
+            )
 
         # Process chat query
         response = chat_service.process_chat_query(query)
 
-        # Convert to JSON-serializable format
-        return jsonify(
-            {
-                "answer": response.answer,
-                "sources": [
-                    {
-                        "text": source.text,
-                        "speaker": source.speaker,
-                        "timestamp": source.timestamp,
-                        "score": source.score,
-                        "file_name": source.file_name,  # Include file name
-                    }
-                    for source in response.sources
-                ],
-                "query": response.query,
-                "timestamp": response.timestamp,
-                "tokens_used": response.tokens_used,
-                "file_names": response.file_names,  # Include file names in the response
-            }
+        response_dict = {
+            "answer": response.answer,
+            "sources": [
+                {
+                    "text": source.text,
+                    "speaker": source.speaker,
+                    "timestamp": source.timestamp,
+                    "score": source.score,
+                    "file_name": source.file_name,
+                }
+                for source in response.sources
+            ],
+            "query": response.query,
+            "timestamp": response.timestamp,
+            "tokens_used": response.tokens_used,
+            "file_names": response.file_names,
+        }
+        return Response(
+            json.dumps(response_dict, ensure_ascii=False), mimetype="application/json"
         )
 
     except Exception as e:
         logger.error(f"API chat error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return Response(
+            json.dumps({"error": str(e)}, ensure_ascii=False),
+            mimetype="application/json",
+            status=500,
+        )
 
 
 @app.route("/api/search", methods=["POST"])
