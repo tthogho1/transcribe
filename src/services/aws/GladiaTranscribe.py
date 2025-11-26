@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from services.database.youtube_dynamodb_client import YoutubeDynamoDBClient
+from services.database.youtube_dynamodb_client import YouTubeDynamoDBClient
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -51,7 +51,8 @@ class GladiaTranscriber:
         )
 
         # DynamoDBクライアント初期化
-        self.dynamodb_client = YoutubeDynamoDBClient()
+        table_name = os.getenv("YOUTUBE_DYNAMODB_TABLE", "YoutubeList")
+        self.dynamodb_client = YouTubeDynamoDBClient(table_name=table_name)
         logger.info("✅ DynamoDB client initialized")
 
     def upload_audio_to_gladia(self, s3_bucket: str, s3_key: str) -> str:
