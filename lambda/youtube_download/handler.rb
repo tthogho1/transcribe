@@ -301,8 +301,10 @@ class YouTubeDownloader
       info_cmd = [
         yt_dlp_path,
         '--print', 'filename',
-        '--format', 'bestaudio[ext=mp4]/bestaudio[ext=m4a]/bestaudio',
+        '--format', 'bestaudio[ext=m4a]/bestaudio',
         '--no-playlist',
+        '--extractor-args', 'youtube:player_client=web',
+        '--extractor-args', 'youtube:skip=hls,dash',
         '--output', "#{video_id}.%(ext)s",
         youtube_url
       ]
@@ -323,8 +325,10 @@ class YouTubeDownloader
       # yt-dlpから標準出力にストリーミング
       stream_cmd = [
         yt_dlp_path,
-        '--format', 'bestaudio[ext=mp4]/bestaudio[ext=m4a]/bestaudio',
+        '--format', 'bestaudio[ext=m4a]/bestaudio',
         '--no-playlist',
+        '--extractor-args', 'youtube:player_client=web',  # webクライアントのみ使用
+        '--extractor-args', 'youtube:skip=hls,dash',  # HLS/DASHをスキップ
         '--output', '-',  # 標準出力に出力
         youtube_url
       ]
@@ -335,6 +339,15 @@ class YouTubeDownloader
       Open3.popen3(*stream_cmd) do |stdin, stdout, stderr, wait_thr|
         stdin.close
         
+        # stderrを別スレッドで読み取り（ブロック防止）
+        error_output = []
+        stderr_thread = Thread.new do
+          stderr.each_line do |line|
+            error_output << line
+            puts "yt-dlp: #{line.strip}"
+          end
+        end
+        
         # S3へのマルチパートアップロードを開始
         multipart_upload = @s3_client.create_multipart_upload(
           bucket: @s3_bucket,
@@ -343,13 +356,21 @@ class YouTubeDownloader
         )
         
         upload_id = multipart_upload.upload_id
+        puts "🟢 Multipart upload started: upload_id=#{upload_id}"
+        
         parts = []
         part_number = 1
         chunk_size = 5 * 1024 * 1024  # 5MB chunks
         
         begin
+          puts "🟢 Starting to read chunks from yt-dlp..."
+          puts "🔎 stdout ready? #{!stdout.closed?}"
+          
           while chunk = stdout.read(chunk_size)
+            puts "🔎 Read attempt - chunk nil? #{chunk.nil?}, empty? #{chunk&.empty?}"
             break if chunk.nil? || chunk.empty?
+            
+            puts "🟢 Read chunk: #{chunk.length} bytes"
             
             # チャンクをS3にアップロード
             part_response = @s3_client.upload_part(
@@ -360,14 +381,54 @@ class YouTubeDownloader
               body: chunk
             )
             
+            etag_value = part_response.etag
+            puts "🔎 Raw ETag: #{etag_value.inspect}"
+            puts "🔎 ETag class: #{etag_value.class}"
+            
+            # ETagがクォートで囲まれているか確認し、なければ追加
+            etag_value = "\"#{etag_value}\"" unless etag_value.start_with?('"')
+
             parts << {
-              etag: part_response.etag,
+              etag: etag_value,
               part_number: part_number
             }
             
             part_number += 1
             puts "📦 Uploaded part #{part_number - 1} (#{chunk.length} bytes)"
           end
+          
+          puts "🟢 Finished reading chunks. Total parts: #{parts.length}"
+          
+          # stderrスレッドの終了を待つ
+          stderr_thread.join
+          
+          # yt-dlpの終了ステータスを確認
+          exit_status = wait_thr.value
+          puts "🔎 yt-dlp exit status: #{exit_status.exitstatus}"
+          
+          if !error_output.empty?
+            puts "⚠️ yt-dlp errors/warnings:"
+            error_output.each { |line| puts "  #{line.strip}" }
+          end
+          
+          # parts配列が空でないか確認
+          if parts.empty?
+            puts "❌ No parts uploaded, aborting multipart upload"
+            @s3_client.abort_multipart_upload(
+              bucket: @s3_bucket,
+              key: s3_key,
+              upload_id: upload_id
+            )
+            
+            return {
+              video_id: video_id,
+              success: false,
+              message: "No data received from yt-dlp"
+            }
+          end
+          
+          puts "🔧 Completing multipart upload with #{parts.length} parts"
+          puts "🔎 Parts array: #{parts.inspect}"
           
           # マルチパートアップロードを完了
           @s3_client.complete_multipart_upload(
