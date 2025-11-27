@@ -1,3 +1,4 @@
+import binascii
 import boto3
 import logging
 import os
@@ -24,7 +25,7 @@ class GladiaTranscriber:
     def __init__(self):
         """初期化"""
         self.gladia_api_key = os.getenv("GLADIA_API_KEY")
-        self.gladia_base_url = "https://api.gladia.io/v2/transcription"
+        self.gladia_base_url = os.getenv("GLADIA_API_URL", "https://api.gladia.io/v2/")
 
         if not self.gladia_api_key:
             raise ValueError("GLADIA_API_KEY環境変数が設定されていません")
@@ -70,14 +71,21 @@ class GladiaTranscriber:
             # S3から音声ファイルを取得
             response = self.s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
             audio_data = response["Body"].read()
+            content_type = response.get("ContentType", "audio/mp4")  # ← 追加
+
+            if isinstance(audio_data, bytes) and len(audio_data) > 0:
+                print("audio_data は有効なバイナリデータです。")
+                print(binascii.hexlify(audio_data[:64]))  # 先頭64バイトを16進数で表示
+            else:
+                print("audio_data は空か、バイナリデータではありません。")
 
             # Gladiaにファイルをアップロード
-            upload_url = f"{self.gladia_base_url}/upload"
+            upload_url = f"{self.gladia_base_url}upload"
             headers = {
                 "x-gladia-key": self.gladia_api_key,
             }
 
-            files = {"file": (os.path.basename(s3_key), audio_data, "audio/mp4")}
+            files = {"audio": (os.path.basename(s3_key), audio_data, content_type)}
 
             logger.info(f"📤 Uploading audio file to Gladia: {s3_key}")
             upload_response = requests.post(upload_url, headers=headers, files=files)
@@ -115,45 +123,45 @@ class GladiaTranscriber:
                 "Content-Type": "application/json",
             }
 
+            subtitles_config = {"formats": ["srt", "vtt"]}
+
             # 転写リクエストデータ
             transcription_data = {
                 "audio_url": audio_url,
                 "language": "ja",  # 日本語
-                "language_behaviour": "automatic single language",
-                "transcription_hint": "",
-                "output_format": "json",
-                "speaker_labels": True,  # 話者識別
-                "subtitles": False,
-                "detect_language": False,
+                "subtitles": True,
+                "detect_language": True,
+                "subtitles_config": subtitles_config,
             }
 
-            logger.info(f"🚀 Starting Gladia transcription for: {file_id}")
-            response = requests.post(
-                self.gladia_base_url, headers=headers, json=transcription_data
-            )
+            logger.info(f"🚀: {file_id}")
+            url = f"{self.gladia_base_url}pre-recorded"
+            response = requests.post(url, headers=headers, json=transcription_data)
             response.raise_for_status()
 
             result = response.json()
             job_id = result.get("id")
+            result_url = result.get("result_url")
 
             if not job_id:
                 raise ValueError(f"Gladiaからのレスポンスにidがありません: {result}")
 
             logger.info(f"✅ Transcription job started: {job_id}")
-            return job_id
+            return job_id, result_url
 
         except Exception as e:
             logger.error(f"❌ Failed to start Gladia transcription: {e}")
             raise
 
     def wait_for_completion(
-        self, job_id: str, max_wait_time: int = 1800
+        self, job_id: str, result_url, max_wait_time: int = 1800
     ) -> Dict[str, Any]:
         """
         転写ジョブの完了を待機
 
         Args:
             job_id: 転写ジョブID
+            resulrt_url : 転写結果URL
             max_wait_time: 最大待機時間（秒）
 
         Returns:
@@ -167,9 +175,7 @@ class GladiaTranscriber:
 
         while time.time() - start_time < max_wait_time:
             try:
-                response = requests.get(
-                    f"{self.gladia_base_url}/{job_id}", headers=headers
-                )
+                response = requests.get(f"{result_url}", headers=headers)
                 response.raise_for_status()
 
                 result = response.json()
@@ -205,17 +211,16 @@ class GladiaTranscriber:
         try:
             # 結果をJSON形式で変換
             transcription_json = {
-                "jobName": file_id,
-                "accountId": "gladia",
+                "status": "done",
                 "results": {
-                    "transcripts": [
-                        {
-                            "transcript": result.get("result", {})
-                            .get("transcription", {})
-                            .get("full_transcript", "")
-                        }
-                    ],
-                    "items": [],
+                    "language": "",
+                    "confidence": 0,
+                    "transcription": {
+                        "full_transcript": result.get("result", {})
+                        .get("transcription", {})
+                        .get("full_transcript", ""),
+                        "utterances": [],
+                    },
                 },
             }
 
@@ -227,18 +232,14 @@ class GladiaTranscriber:
                 if "utterances" in gladia_result:
                     for utterance in gladia_result["utterances"]:
                         item = {
-                            "start_time": str(utterance.get("start", 0)),
-                            "end_time": str(utterance.get("end", 0)),
-                            "alternatives": [
-                                {
-                                    "confidence": str(utterance.get("confidence", 1.0)),
-                                    "content": utterance.get("text", ""),
-                                }
-                            ],
-                            "type": "pronunciation",
-                            "speaker_label": f"spk_{utterance.get('speaker', 0)}",
+                            "speaker": "",
+                            "start": utterance.get("start", 0),
+                            "end": utterance.get("end", 0),
+                            "text": utterance.get("text", ""),
                         }
-                        transcription_json["results"]["items"].append(item)
+                        transcription_json["results"]["transcription"][
+                            "utterances"
+                        ].append(item)
 
             # S3にアップロード
             s3_key = f"{file_id}_transcription.json"
@@ -283,10 +284,10 @@ class GladiaTranscriber:
             audio_url = self.upload_audio_to_gladia(s3_bucket, s3_key)
 
             # 2. 転写ジョブを開始
-            job_id = self.start_transcription(audio_url, file_id)
+            job_id, result_url = self.start_transcription(audio_url, file_id)
 
             # 3. 転写完了を待機
-            result = self.wait_for_completion(job_id)
+            result = self.wait_for_completion(job_id, result_url)
 
             # 4. 結果をS3に保存
             self.save_result_to_s3(result, file_id)
