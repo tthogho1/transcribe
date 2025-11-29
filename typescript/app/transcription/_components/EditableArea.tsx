@@ -5,6 +5,7 @@ export default function EditableArea({ id, initialValue }: { id: string; initial
   const [value, setValue] = useState<string>(initialValue);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const copyToClipboard = async () => {
     try {
@@ -34,6 +35,31 @@ export default function EditableArea({ id, initialValue }: { id: string; initial
     }
   };
 
+  const saveToS3 = async () => {
+    try {
+      setSaving(true);
+      const response = await fetch(`/api/videos/${id}/transcription`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: value,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Save failed');
+      }
+
+      alert('S3への保存が完了しました');
+    } catch (error) {
+      console.error('Save error:', error);
+      alert(`保存に失敗しました: ${error}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
@@ -42,6 +68,9 @@ export default function EditableArea({ id, initialValue }: { id: string; initial
         </button>
         <button className="btn btn-primary" onClick={downloadFile} disabled={downloading}>
           {downloading ? 'Downloading...' : 'Download'}
+        </button>
+        <button className="btn btn-success" onClick={saveToS3} disabled={saving}>
+          {saving ? 'Saving...' : 'Save to S3'}
         </button>
         <a
           href={`/api/videos/${id}/transcription`}
