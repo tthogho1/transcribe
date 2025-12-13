@@ -25,10 +25,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # fugashi/unidic の動作確認とセットアップ
-RUN python -c "import fugashi; print('✅ fugashi imported successfully')" || \
-    echo "⚠️ fugashi import failed" && \
-    python -c "import unidic; print('✅ unidic available')" || \
-    echo "⚠️ unidic not available"
+RUN python -c "import fugashi; print('✅ fugashi imported successfully')" && \
+    python -c "import unidic_lite; print('✅ unidic-lite available')" && \
+    echo "✅ Japanese tokenization ready"
 
 # アプリケーションファイルをコピー
 COPY src/ ./src/
