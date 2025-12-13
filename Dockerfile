@@ -32,8 +32,8 @@ RUN python -c "import fugashi; print('✅ fugashi imported successfully')" && \
 # アプリケーションファイルをコピー
 COPY src/ ./src/
 
-# artifactsフォルダを作成（TF-IDFモデルは実行時に自動生成）
-RUN mkdir -p ./artifacts
+# TF-IDFモデルファイルをコピー（Git LFS経由）
+COPY artifacts/ ./artifacts/
 
 # Hugging Face Spaces用環境変数（CPU無料版最適化）
 ENV FLASK_PORT=7860 \
