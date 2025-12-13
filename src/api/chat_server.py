@@ -862,11 +862,11 @@ if __name__ == "__main__":
     logger.info(f"Debug mode: {debug}")
     logger.info(f"Environment: {'Development' if debug else 'Production'}")
 
-    # Hugging Face Spaces対応: 本番環境ではallow_unsafe_werkzeugをFalseに
+    # Hugging Face Spaces対応: Werkzeugサーバーを許可
     socketio.run(
         app,
         host="0.0.0.0",
         port=port,
         debug=debug,
-        allow_unsafe_werkzeug=debug,  # debugモードの時のみTrue
+        allow_unsafe_werkzeug=True,  # Hugging Face Spacesでは常にTrue
     )
