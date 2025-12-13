@@ -1,3 +1,12 @@
+---
+title: Higma Chat RAG
+emoji: 💬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
 # 🤗 Hugging Face Spaces デプロイガイド（CPU 無料版最適化）
 
 この README は、Chat Server を Hugging Face Spaces（Docker CPU Free Tier）にデプロイする手順を説明します。
