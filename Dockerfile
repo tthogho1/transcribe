@@ -1,76 +1,51 @@
-# Multi-stage build for optimized Flask Chat Server
-FROM python:3.11-slim as builder
+# Hugging Face Spaces (Docker CPU Free Tier) 最適化版 Dockerfile
+FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# 作業ディレクトリ設定
+WORKDIR /app
 
-# Install system dependencies for building
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    g++ \
-    cmake \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create and activate virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Production stage
-FROM python:3.11-slim as production
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PATH="/opt/venv/bin:$PATH"
-ENV FLASK_ENV=production
-ENV FLASK_PORT=5000
-
-# Install runtime dependencies only
-RUN apt-get update && apt-get install -y \
-    curl \
+# ビルド時間短縮: システムパッケージを先にインストール
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    mecab \
+    libmecab-dev \
+    mecab-ipadic-utf8 \
+    git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
+# CPU無料版最適化: pip設定
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Create non-root user for security
-RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /bin/bash appuser
+# requirements.txtをコピー（キャッシュ活用）
+COPY requirements.hf.txt requirements.txt
 
-# Create app directory
-WORKDIR /app
+# 依存関係インストール - CPU版PyTorchを使用
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# アプリケーションファイルをコピー
 COPY src/ ./src/
-COPY .env* ./
+COPY artifacts/ ./artifacts/
 
-# Create necessary directories and set permissions
-RUN mkdir -p /app/logs /app/cache && \
-    chown -R appuser:appgroup /app
+# Hugging Face Spaces用環境変数（CPU無料版最適化）
+ENV FLASK_PORT=7860 \
+    FLASK_DEBUG=False \
+    CROSS_ENCODER_DEVICE=cpu \
+    CROSS_ENCODER_BATCH_SIZE=4 \
+    CROSS_ENCODER_MAX_LENGTH=256 \
+    INITIAL_SEARCH_MULTIPLIER=2 \
+    PYTHONUNBUFFERED=1 \
+    TOKENIZERS_PARALLELISM=false \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2
 
-# Switch to non-root user
-USER appuser
+# ポート7860を公開
+EXPOSE 7860
 
-# Expose Flask port
-EXPOSE 5000
+# ヘルスチェック（CPU負荷を考慮して間隔を長めに）
+HEALTHCHECK --interval=60s --timeout=30s --start-period=120s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:7860/health', timeout=10)" || exit 1
 
-# Health check for Flask chat server
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
-# Set working directory to src for proper module imports
-WORKDIR /app/src
-
-# Default command for Flask chat server
-CMD ["python", "chat_server.py"]
+# アプリケーション起動
+CMD ["python", "src/api/chat_server.py"]

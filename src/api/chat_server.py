@@ -854,12 +854,19 @@ def handle_chat_message(data):
 
 if __name__ == "__main__":
     """Run the Flask chat server"""
-    port = int(os.getenv("FLASK_PORT", 5000))
+    # Hugging Face Spaces対応: デフォルトポートを7860に変更
+    port = int(os.getenv("FLASK_PORT", 7860))
     debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
     logger.info(f"Starting Flask chat server on port {port}")
     logger.info(f"Debug mode: {debug}")
+    logger.info(f"Environment: {'Development' if debug else 'Production'}")
 
+    # Hugging Face Spaces対応: 本番環境ではallow_unsafe_werkzeugをFalseに
     socketio.run(
-        app, host="0.0.0.0", port=port, debug=debug, allow_unsafe_werkzeug=True
+        app,
+        host="0.0.0.0",
+        port=port,
+        debug=debug,
+        allow_unsafe_werkzeug=debug,  # debugモードの時のみTrue
     )
