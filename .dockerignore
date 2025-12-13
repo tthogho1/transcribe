@@ -1,0 +1,81 @@
+# Hugging Face Spaces用 .dockerignore
+# ビルド時間とイメージサイズを削減
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker関連
+Dockerfile*
+!Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# ドキュメント（不要な場合）
+*.md
+!README.md
+docs/
+
+# 開発・テスト用ファイル
+test_*.py
+*_test.py
+tests/
+scripts/
+lambda/
+
+# TypeScriptプロジェクト（不要）
+typescript/
+node_modules/
+
+# データファイル（大きいファイルは除外）
+downloads/
+*.mp4
+*.mp3
+*.wav
+*.zip
+*.tar.gz
+
+# ビルドファイル
+buildspec*.yml
+codebuild-infrastructure.yaml
+cloudformation-infrastructure.yaml
+Jenkinsfile
+*.sh
+
+# その他の不要ファイル
+env_template.txt
+.env.example
+ecs-task-definition.json

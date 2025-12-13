@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Chat with Conversation Search</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🤖 AI Chat with Conversation Search</h1>
+        <p>
+          Ask questions about past conversations - AI will search and provide context-aware answers
+        </p>
+      </div>
+
+      <div class="chat-container">
+        <div class="chat-area">
+          <div class="messages" id="messages">
+            <div class="message ai-message">
+              <strong>AI Assistant:</strong>
+              こんにちは！働く上での悩みに対して私の経験をもとにお答えします。
+            </div>
+          </div>
+
+          <div class="input-area">
+            <div class="input-group">
+              <input type="text" id="messageInput" placeholder="質問を入力してください..." />
+              <button id="sendButton">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sources-area">
+          <div class="sources-header">📚 Search Sources</div>
+          <div class="sources-content" id="sourcesContent">
+            <p style="color: #888; font-style: italic">
+              質問すると、関連する会話の検索結果がここに表示されます。
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+  </body>
+</html>

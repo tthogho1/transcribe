@@ -1,0 +1,51 @@
+# ============================================
+# Hugging Face Spaces (Docker CPU Free Tier) 最適化版
+# ============================================
+
+# Web application framework
+flask==3.0.3
+flask-cors==5.0.0
+flask-socketio==5.4.1
+requests==2.32.4
+python-dotenv==1.1.1
+
+# RAG services
+openai==1.58.1
+cohere==5.14.0
+langdetect==1.0.9
+deep-translator==1.11.4
+
+# Vector search & embeddings - CPU最適化
+sentence-transformers==4.1.0
+# PyTorch CPU版を明示的に指定（サイズ削減: ~2GB → ~200MB）
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+transformers==4.53.0
+tokenizers==0.21.2
+
+# Scientific computing - 軽量版
+numpy==2.3.1
+scikit-learn==1.7.0
+scipy==1.16.0
+joblib==1.5.1
+
+# Japanese NLP - MeCab（システムパッケージも必要）
+fugashi==1.5.1
+unidic-lite==1.0.8
+mecab-python3==1.0.8
+
+# Text processing - langchainの代わりに軽量実装を使用
+# langchain==0.3.26  # コメントアウト - text_splitterのみ使用なので自前実装で代替可能
+
+# Vector database
+pymilvus==2.5.11
+
+# AWS services - chat_server.pyでは不使用だがプロジェクト全体で必要
+boto3==1.38.45
+
+# ============================================
+# サイズ削減の見積もり:
+# - PyTorch: CPU版指定で約1.8GB削減
+# - langchain削除: 約200MB削減（text_splitterを自前実装する場合）
+# 合計削減: 約2GB → ビルド時間を30-40%短縮
+# ============================================
