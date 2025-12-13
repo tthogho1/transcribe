@@ -27,7 +27,7 @@ class DenseVectorGenerator:
         # Pre-configure fugashi with unidic to avoid unidic_lite dependency
         try:
             import fugashi
-            import unidic
+            import unidic_lite as unidic
 
             # Pre-initialize fugashi with unidic to prevent automatic unidic_lite detection
             _ = fugashi.Tagger()
