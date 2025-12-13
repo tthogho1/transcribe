@@ -34,8 +34,8 @@ fugashi==1.5.1
 unidic-lite==1.0.8
 mecab-python3==1.0.8
 
-# Text processing - langchainの代わりに軽量実装を使用
-# langchain==0.3.26  # コメントアウト - text_splitterのみ使用なので自前実装で代替可能
+# Text processing
+langchain==0.3.26
 
 # Vector database
 pymilvus==2.5.11
