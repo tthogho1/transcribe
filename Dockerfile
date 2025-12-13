@@ -26,7 +26,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # アプリケーションファイルをコピー
 COPY src/ ./src/
-COPY artifacts/ ./artifacts/
+
+# artifactsフォルダを作成（TF-IDFモデルは実行時に自動生成）
+RUN mkdir -p ./artifacts
 
 # Hugging Face Spaces用環境変数（CPU無料版最適化）
 ENV FLASK_PORT=7860 \
