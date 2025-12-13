@@ -18,7 +18,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # requirements.txtをコピー（キャッシュ活用）
-COPY requirements.hf.txt requirements.txt
+COPY requirements.txt .
 
 # 依存関係インストール - CPU版PyTorchを使用
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
