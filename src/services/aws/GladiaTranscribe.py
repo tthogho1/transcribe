@@ -212,7 +212,7 @@ class GladiaTranscriber:
             # 結果をJSON形式で変換
             transcription_json = {
                 "status": "done",
-                "results": {
+                "result": {
                     "language": "",
                     "confidence": 0,
                     "transcription": {
@@ -237,7 +237,7 @@ class GladiaTranscriber:
                             "end": utterance.get("end", 0),
                             "text": utterance.get("text", ""),
                         }
-                        transcription_json["results"]["transcription"][
+                        transcription_json["result"]["transcription"][
                             "utterances"
                         ].append(item)
 

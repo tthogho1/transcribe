@@ -93,8 +93,15 @@ export default function YouTubePlayer({ videoId, onClose }: YouTubePlayerProps) 
       const response = await fetch(`/api/videos/${videoId}/download`);
       if (response.ok) {
         const data = await response.json();
+        console.log('=== DEBUG: Fetched transcript data ===');
+        console.log('Full data:', JSON.stringify(data, null, 2));
+        console.log('Has result?', !!data.result);
+        console.log('Has transcription?', !!data.result?.transcription);
+        console.log('Has utterances?', !!data.result?.transcription?.utterances);
+        console.log('Utterances length:', data.result?.transcription?.utterances?.length);
+        console.log('Data keys:', Object.keys(data));
         setTranscriptData(data);
-        console.log('Transcript loaded:', data);
+        console.log('Transcript state set');
       }
     } catch (error) {
       console.error('Failed to load transcript:', error);
@@ -240,10 +247,21 @@ export default function YouTubePlayer({ videoId, onClose }: YouTubePlayerProps) 
           <div className="text-sm text-gray-600">
             <p>Video ID: {videoId}</p>
             {transcriptData && (
-              <p className="mt-1">
-                Loaded {transcriptData.result.transcription.utterances.length} subtitles
-              </p>
+              <>
+                <p className="mt-1">
+                  Loaded {transcriptData?.result?.transcription?.utterances?.length ?? 0} subtitles
+                </p>
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
+                    Show Debug Info
+                  </summary>
+                  <pre className="mt-2 p-2 bg-gray-100 rounded overflow-auto max-h-60">
+                    {JSON.stringify(transcriptData, null, 2)}
+                  </pre>
+                </details>
+              </>
             )}
+            {!transcriptData && <p className="mt-1 text-gray-400">No transcript data loaded</p>}
           </div>
         </div>
       </div>
