@@ -5,7 +5,8 @@ Text processing utilities for conversation analysis
 import os
 from datetime import datetime
 from typing import List, Dict, Any
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from models.conversation_chunk import ConversationChunk
 
 

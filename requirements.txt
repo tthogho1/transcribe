@@ -9,6 +9,9 @@ flask-socketio==5.4.1
 requests==2.32.4
 python-dotenv==1.1.1
 
+# Session management
+redis==5.2.1
+
 # RAG services
 openai==1.58.1
 cohere==5.14.0
@@ -19,7 +22,8 @@ deep-translator==1.11.4
 sentence-transformers==4.1.0
 # PyTorch CPU版を明示的に指定（サイズ削減: ~2GB → ~200MB）
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.7.1+cpu
+#torch==2.7.1+cpu
+torch==2.9.1
 transformers==4.53.0
 tokenizers==0.21.2
 

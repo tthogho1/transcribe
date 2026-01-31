@@ -61,8 +61,17 @@ class ConversationVectorizer:
         print("✅ HybridVectorGenerator initialized")
 
         print("🔧 Initializing ZillizClient...")
-        self.zilliz_client = ZillizClient(zilliz_uri, zilliz_token, collection_name)
-        print("✅ ZillizClient initialized")
+        # Only initialize ZillizClient when URI is provided; allow running without Zilliz
+        if zilliz_uri:
+            try:
+                self.zilliz_client = ZillizClient(zilliz_uri, zilliz_token, collection_name)
+                print("✅ ZillizClient initialized")
+            except Exception as e:
+                print(f"⚠️ ZillizClient initialization failed: {e}")
+                self.zilliz_client = None
+        else:
+            print("⚠️ ZILLIZ_URI not provided - skipping ZillizClient initialization")
+            self.zilliz_client = None
 
         # Initialize TF-IDF sparse vectorizer
         print("🔧 Initializing TfidfSparseVectorizer...")
@@ -128,7 +137,13 @@ class ConversationVectorizer:
         )
 
         # 5. Insert into Zilliz
-        self.zilliz_client.insert_data(chunks, embeddings)
+        if self.zilliz_client:
+            try:
+                self.zilliz_client.insert_data(chunks, embeddings)
+            except Exception as e:
+                print(f"⚠️ Skipped inserting data into Zilliz: {e}")
+        else:
+            print("⚠️ Zilliz client not available - skipping data insertion")
 
         print("🎉 Hybrid processing completed!")
         return chunks
@@ -158,6 +173,10 @@ class ConversationVectorizer:
             sparse_query = self.sparse_vectorizer.transform([query])[0]
 
             # Perform hybrid search
+            if not self.zilliz_client:
+                print("⚠️ Zilliz client not available - hybrid search unavailable")
+                return []
+
             results = self.zilliz_client.hybrid_search(
                 dense_query, sparse_query, limit, rerank_k
             )
@@ -184,6 +203,10 @@ class ConversationVectorizer:
             )
 
             # Perform dense search
+            if not self.zilliz_client:
+                print("⚠️ Zilliz client not available - dense search unavailable")
+                return []
+
             results = self.zilliz_client.dense_search(dense_query, limit)
 
             return results

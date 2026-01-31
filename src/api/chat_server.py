@@ -6,6 +6,7 @@ Provides RAG (Retrieval-Augmented Generation) functionality for conversation sea
 import os
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -22,9 +23,10 @@ from langdetect import detect
 from deep_translator import GoogleTranslator
 
 # Import from our models
-from models.conversation_chunk import SearchResult
+from src.models.conversation_chunk import SearchResult
 from core.conversation_vectorizer import ConversationVectorizer
 from services.database.zilliz_client import ZillizClient
+from services.session.session_manager import SessionManager
 
 # Load environment variables
 load_dotenv()
@@ -104,6 +106,14 @@ class ZillizSearchEngine:
     def _initialize(self):
         """Initialize Zilliz connection and embedding model"""
         try:
+            # If no ZILLIZ_URI is provided, skip attempting to connect to Zilliz
+            if not self.zilliz_uri:
+                logger.warning(
+                    "⚠️ ZILLIZ_URI not set - skipping Zilliz initialization"
+                )
+                self.collection = None
+                return
+
             # Initialize embedding model
             logger.info("Loading embedding model...")
             self.embedding_model = SentenceTransformer(
@@ -402,14 +412,16 @@ class OpenAIGenerator:
         self,
         query: str,
         search_results: List[SearchResult],
+        conversation_history: List[Dict] = None,
         is_english_input: bool = False,
     ) -> Dict[str, Any]:
         """
-        Generate response using OpenAI with search results as context
+        Generate response using OpenAI with search results and conversation history
 
         Args:
             query: User's question
             search_results: Relevant conversation excerpts from Zilliz
+            conversation_history: Previous conversation messages for context
             is_english_input: Whether the original input was in English
 
         Returns:
@@ -453,16 +465,48 @@ Context from relevant conversations:
 Please provide a helpful answer based on the above context.
 If the context doesn't contain enough information to answer the question, please say so."""
 
+            # Build messages array with conversation history
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Add conversation history if available
+            if conversation_history:
+                trimmed_history = self._trim_history(conversation_history)
+                messages.extend(trimmed_history)
+
+            # Add current query with RAG context
+            messages.append({"role": "user", "content": user_prompt})
+
             # Generate response using OpenAI v1 client
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-            )
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
+            except Exception as api_error:
+                # Handle token limit exceeded error
+                if "maximum context length" in str(api_error).lower():
+                    logger.warning("Token limit exceeded, trimming more aggressively")
+                    # Retry with more aggressive trimming
+                    if conversation_history:
+                        trimmed_history = self._trim_history(
+                            conversation_history,
+                            max_turns=10,
+                            max_tokens=2000
+                        )
+                        messages = [{"role": "system", "content": system_prompt}]
+                        messages.extend(trimmed_history)
+                        messages.append({"role": "user", "content": user_prompt})
+
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                    )
+                else:
+                    raise
 
             print(user_prompt)
             answer = response.choices[0].message.content
@@ -492,6 +536,41 @@ If the context doesn't contain enough information to answer the question, please
                 "model": self.model,
                 "error": str(e),
             }
+
+    def _trim_history(
+        self,
+        history: List[Dict],
+        max_turns: int = 20,
+        max_tokens: int = 4000
+    ) -> List[Dict]:
+        """
+        Trim conversation history to fit within context window
+
+        Args:
+            history: List of conversation messages
+            max_turns: Maximum number of turns to keep
+            max_tokens: Maximum tokens to keep (approximate)
+
+        Returns:
+            Trimmed conversation history
+        """
+        if not history:
+            return []
+
+        # Filter to user/assistant messages only
+        conversation = [m for m in history if m["role"] in ["user", "assistant"]]
+
+        # Trim by turns (keep most recent)
+        if len(conversation) > max_turns:
+            conversation = conversation[-max_turns:]
+
+        # Trim by tokens (approximate: 1 token ≈ 4 characters)
+        total_tokens = sum(len(m["content"]) // 4 for m in conversation)
+        while total_tokens > max_tokens and len(conversation) > 2:
+            removed = conversation.pop(0)
+            total_tokens -= len(removed["content"]) // 4
+
+        return conversation
 
 
 class ChatService:
@@ -594,12 +673,20 @@ class ChatService:
             logger.error(f"❌ Initialization error: {e}")
             # Continue anyway - the system might still work with fallbacks
 
-    def process_chat_query(self, query: str, max_results: int = 5) -> ChatResponse:
+    def process_chat_query(
+        self,
+        query: str,
+        user_id: str = None,
+        conversation_history: List[Dict] = None,
+        max_results: int = 5
+    ) -> ChatResponse:
         """
-        Process a chat query with RAG (Retrieval-Augmented Generation)
+        Process a chat query with RAG (Retrieval-Augmented Generation) and conversation history
 
         Args:
             query: User's question
+            user_id: User identifier for tracking
+            conversation_history: Previous conversation messages for context
             max_results: Maximum number of search results to use
 
         Returns:
@@ -625,9 +712,12 @@ class ChatService:
 
             # search_results = self.vectorizer.search_similar(query, limit=max_results)
 
-            # Generate AI response
+            # Generate AI response with conversation history
             ai_response = self.ai_generator.generate_response(
-                query, search_results, is_english_input
+                query=query,
+                search_results=search_results,
+                conversation_history=conversation_history or [],
+                is_english_input=is_english_input
             )
 
             # Collect file names from search results
@@ -662,8 +752,9 @@ class ChatService:
             )
 
 
-# Initialize chat service
+# Initialize chat service and session manager
 chat_service = ChatService()
+session_manager = SessionManager()
 
 
 # Flask Routes
@@ -675,12 +766,13 @@ def index():
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    """REST API endpoint for chat"""
+    """REST API endpoint for chat with session memory"""
     try:
         data = request.get_json()
         query = data.get("query", "").strip()
+        user_id = data.get("user_id", str(uuid.uuid4()))
 
-        logger.info(f"API /api/chat received query: {query}")
+        logger.info(f"API /api/chat received query from {user_id}: {query}")
 
         if not query:
             return Response(
@@ -689,8 +781,26 @@ def api_chat():
                 status=400,
             )
 
-        # Process chat query
-        response = chat_service.process_chat_query(query)
+        # Get conversation history
+        conversation_history = session_manager.get_history_for_openai(user_id)
+
+        # Process chat query with history
+        response = chat_service.process_chat_query(
+            query=query,
+            user_id=user_id,
+            conversation_history=conversation_history
+        )
+
+        # Add user message to history
+        session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
+
+        # Add assistant response to history
+        session_manager.add_message(
+            user_id,
+            "assistant",
+            response.answer,
+            tokens=response.tokens_used
+        )
 
         response_dict = {
             "answer": response.answer,
@@ -708,6 +818,7 @@ def api_chat():
             "timestamp": response.timestamp,
             "tokens_used": response.tokens_used,
             "file_names": response.file_names,
+            "user_id": user_id,  # Return user_id for client tracking
         }
         return Response(
             json.dumps(response_dict, ensure_ascii=False), mimetype="application/json"
@@ -760,9 +871,79 @@ def api_search():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/session/clear", methods=["POST"])
+def api_clear_session():
+    """Clear conversation history for user"""
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+
+        session_manager.clear_session(user_id)
+
+        return jsonify({
+            "status": "success",
+            "message": f"Session cleared for {user_id}"
+        })
+
+    except Exception as e:
+        logger.error(f"Error clearing session: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/session/export", methods=["POST"])
+def api_export_session():
+    """Export conversation history for user"""
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+
+        session = session_manager.get_session(user_id)
+
+        if not session:
+            return jsonify({"error": "No session found"}), 404
+
+        return jsonify({
+            "user_id": session.user_id,
+            "created_at": session.created_at,
+            "last_accessed": session.last_accessed,
+            "total_tokens": session.total_tokens,
+            "messages": [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp,
+                    "tokens": msg.tokens
+                }
+                for msg in session.messages
+            ]
+        })
+
+    except Exception as e:
+        logger.error(f"Error exporting session: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/session/stats", methods=["GET"])
+def api_session_stats():
+    """Get session manager statistics"""
+    try:
+        stats = session_manager.get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting session stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/health")
 def health_check():
     """Health check endpoint"""
+    session_stats = session_manager.get_stats()
     return jsonify(
         {
             "status": "healthy",
@@ -778,6 +959,8 @@ def health_check():
                     if bool(os.getenv("OPENAI_API_KEY"))
                     else "not configured"
                 ),
+                "session_storage": session_stats.get("storage_type", "unknown"),
+                "active_sessions": session_stats.get("active_sessions", 0),
                 "reranking": {
                     "method": chat_service.search_engine.rerank_method,
                     "cohere": (
@@ -812,18 +995,35 @@ def handle_disconnect():
 
 @socketio.on("chat_message")
 def handle_chat_message(data):
-    """Handle chat message via WebSocket"""
+    """Handle chat message via WebSocket with session memory"""
     try:
         query = data.get("query", "").strip()
+        user_id = request.sid  # Use socket session ID as user_id
 
         if not query:
             emit("chat_error", {"error": "Query is required"})
             return
 
-        logger.info(f"Processing chat query: {query}")
+        logger.info(f"Processing chat query from {user_id}: {query}")
 
-        # Process chat query
-        response = chat_service.process_chat_query(query)
+        # Get conversation history
+        conversation_history = session_manager.get_history_for_openai(user_id)
+
+        # Process chat query with history
+        response = chat_service.process_chat_query(
+            query=query,
+            user_id=user_id,
+            conversation_history=conversation_history
+        )
+
+        # Add to session
+        session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
+        session_manager.add_message(
+            user_id,
+            "assistant",
+            response.answer,
+            tokens=response.tokens_used
+        )
 
         # Send response
         emit(
@@ -836,14 +1036,14 @@ def handle_chat_message(data):
                         "speaker": source.speaker,
                         "timestamp": source.timestamp,
                         "score": source.score,
-                        "file_name": source.file_name,  # Include file name
+                        "file_name": source.file_name,
                     }
                     for source in response.sources
                 ],
                 "query": response.query,
                 "timestamp": response.timestamp,
                 "tokens_used": response.tokens_used,
-                "file_names": response.file_names,  # Include file names in the response
+                "file_names": response.file_names,
             },
         )
 
