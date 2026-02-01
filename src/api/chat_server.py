@@ -23,7 +23,7 @@ from langdetect import detect
 from deep_translator import GoogleTranslator
 
 # Import from our models
-from src.models.conversation_chunk import SearchResult
+from models.conversation_chunk import SearchResult
 from core.conversation_vectorizer import ConversationVectorizer
 from services.database.zilliz_client import ZillizClient
 from services.session.session_manager import SessionManager
