@@ -9,6 +9,12 @@ import os
 import logging
 from pathlib import Path
 
+# Windows consoles often default to cp932, which can't encode the emoji used
+# in this script's status output; force UTF-8 so startup doesn't crash.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def setup_python_path():
     """Add src directory to Python path for imports"""

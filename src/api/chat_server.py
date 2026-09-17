@@ -444,8 +444,14 @@ class OpenAIGenerator:
 
             Important:
             Speak in the first person as if you experienced the event yourself.
-            When referring to past conversations, explain it as your own experience, 
+            When referring to past conversations, explain it as your own experience,
             not as someone else's.
+            The context is raw speech-to-text transcription with no punctuation or
+            sentence breaks. Read through the run-on text carefully and infer the
+            intended meaning; do not require an exact literal phrase match before
+            treating the context as relevant. If the context clearly implies an
+            answer (even indirectly), answer with that inference instead of saying
+            the information is missing.
 
             Guidelines:
             - Answer casually in a natural conversational tone
