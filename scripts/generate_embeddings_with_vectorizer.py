@@ -23,7 +23,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 if PROJECT_ROOT not in os.sys.path:
     os.sys.path.insert(0, PROJECT_ROOT)
 
-from src.core.conversation_vectorizer import ConversationVectorizer
+from core.conversation_vectorizer import ConversationVectorizer
 
 
 load_dotenv()
