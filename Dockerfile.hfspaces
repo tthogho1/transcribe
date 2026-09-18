@@ -1,0 +1,41 @@
+# Hugging Face Spaces (Docker SDK, CPU basic free tier) deployment image.
+# Rename to "Dockerfile" when uploading to the Space repo (see README_HUGGINGFACE.md).
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/src \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    TOKENIZERS_PARALLELISM=false \
+    FLASK_PORT=7860 \
+    HF_HOME=/app/.cache/huggingface
+
+WORKDIR /app
+
+# Install the CPU-only torch wheel first (the default PyPI build pulls in
+# CUDA libraries and is multiple GB larger - not needed on CPU-only Spaces).
+COPY requirements.txt .
+RUN pip install --no-cache-dir torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY src/ ./src/
+
+# HF_HOME lives under /app (not the appuser home dir) so the embedding
+# model download works whether or not the container runtime provisions a
+# real home directory for the non-root user (Spaces runs as a fixed UID).
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -m appuser \
+    && mkdir -p /app/.cache/huggingface \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import requests; requests.get('http://127.0.0.1:7860/health', timeout=5)" || exit 1
+
+WORKDIR /app/src
+CMD ["python", "api/chat_server.py"]

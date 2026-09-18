@@ -2,71 +2,43 @@
 
 ## Overview
 
-This project includes multiple Docker configurations optimized for different use cases:
+This project has two Docker deployment paths:
 
-- **`Dockerfile`** - Main production-ready Dockerfile with multi-stage build
-- **`Dockerfile.production`** - Optimized production build with security hardening
-- **`Dockerfile.dev`** - Development build with debugging tools and hot reload
-- **`docker-compose.chat.yml`** - Docker Compose configuration for both environments
+- **`aws/Dockerfile.production`** - Multi-stage production build (non-root user, CPU-only
+  torch, security hardening) used for local `docker-compose` runs and ECS deployment
+  (`aws/deploy-to-ecs.sh`, `aws/codebuild-infrastructure.yaml`).
+- **`Dockerfile.hfspaces`** - Standalone build for Hugging Face Spaces (Docker SDK, CPU
+  free tier). See `README_HUGGINGFACE.md` for that deployment path.
+- **`docker-compose.chat.yml`** / **`docker-compose.yml`** - Local Docker Compose
+  configurations that build `aws/Dockerfile.production`.
 
 ## Quick Start
 
-### Development Environment
-
 ```bash
-# Using PowerShell (Windows)
-.\docker-build.ps1
+# Build and run via docker-compose (uses aws/Dockerfile.production)
+docker-compose -f docker-compose.chat.yml up -d --build chat-server-prod
 
-# Using Bash (Linux/Mac)
-./docker-build.sh
-
-# Or manually with Docker Compose
-docker-compose -f docker-compose.chat.yml up -d chat-server
+# Or build/run directly with plain docker
+docker build -f aws/Dockerfile.production -t transcribe-chat-server .
+docker run -d --env-file .env -p 5000:5000 transcribe-chat-server
 ```
 
-### Production Environment
+## `aws/Dockerfile.production`
 
-```bash
-# Using PowerShell (Windows)
-.\docker-build.ps1 -Environment production
-
-# Using Bash (Linux/Mac)
-./docker-build.sh -e production
-
-# Or manually with Docker Compose
-docker-compose -f docker-compose.chat.yml --profile production up -d chat-server-prod
-```
-
-## Docker Images
-
-### 1. Main Dockerfile (Production)
-
-- Multi-stage build for optimized image size
-- Uses virtual environment for dependency isolation
-- Non-root user for security
-- Health check for container monitoring
+- Multi-stage build for a smaller final image
+- Installs the CPU-only torch wheel (the default PyPI build pulls in CUDA libraries,
+  multiple GB larger and unused on CPU-only hosts like ECS/Fargate)
+- Uses a virtual environment for dependency isolation
+- Runs as a non-root user
+- Health check hits `/health`
 - Exposed port: 5000
-
-### 2. Development Dockerfile
-
-- Single-stage build with development tools
-- Includes debugging and formatting tools (pytest, black, flake8)
-- Volume mounts for hot reload
-- Development-friendly configuration
-
-### 3. Production Dockerfile
-
-- Highly optimized for production deployment
-- Minimal attack surface
-- Security hardening with non-root user
-- Optimized layer caching
 
 ## Environment Variables
 
 Create a `.env` file with the following variables:
 
 ```env
-# Zilliz Configuration
+# Zilliz Configuration (BM25 hybrid search)
 ZILLIZ_URI=your-zilliz-uri
 ZILLIZ_TOKEN=your-zilliz-token
 
@@ -76,128 +48,65 @@ OPENAI_MODEL=gpt-3.5-turbo
 OPENAI_MAX_TOKENS=1000
 OPENAI_TEMPERATURE=0.7
 
-# Cohere Configuration (optional)
-COHERE_API_KEY=your-cohere-api-key
-
 # Flask Configuration
 FLASK_ENV=production
 FLASK_DEBUG=false
 FLASK_PORT=5000
 
-# Reranking Configuration
-RERANK_METHOD=cross_encoder
-CROSS_ENCODER_DEVICE=auto
-CROSS_ENCODER_BATCH_SIZE=8
-CROSS_ENCODER_MAX_LENGTH=512
-INITIAL_SEARCH_MULTIPLIER=3
-
-# AWS Configuration (if needed)
+# AWS Configuration (if using S3/DynamoDB-backed ingestion)
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=your-region
 S3_BUCKET_NAME=your-bucket-name
 ```
 
-## Build Scripts
-
-### PowerShell Script (Windows)
-
-```powershell
-# Development build and run
-.\docker-build.ps1
-
-# Production build and run
-.\docker-build.ps1 -Environment production
-
-# Build only without running
-.\docker-build.ps1 -BuildOnly
-
-# Build without cache
-.\docker-build.ps1 -NoCache
-
-# Show help
-.\docker-build.ps1 -Help
-```
-
-### Bash Script (Linux/Mac)
-
-```bash
-# Development build and run
-./docker-build.sh
-
-# Production build and run
-./docker-build.sh -e production
-
-# Build only without running
-./docker-build.sh -b
-
-# Build without cache
-./docker-build.sh -n
-
-# Show help
-./docker-build.sh -h
-```
-
 ## Docker Compose Commands
 
-### Development
-
 ```bash
-# Start development environment
-docker-compose -f docker-compose.chat.yml up -d chat-server
-
-# View logs
-docker-compose -f docker-compose.chat.yml logs -f chat-server
-
-# Stop services
-docker-compose -f docker-compose.chat.yml down
-
-# Rebuild and start
-docker-compose -f docker-compose.chat.yml up -d --build chat-server
-```
-
-### Production
-
-```bash
-# Start production environment
-docker-compose -f docker-compose.chat.yml --profile production up -d chat-server-prod
+# Start
+docker-compose -f docker-compose.chat.yml up -d chat-server-prod
 
 # View logs
 docker-compose -f docker-compose.chat.yml logs -f chat-server-prod
 
-# Stop services
-docker-compose -f docker-compose.chat.yml --profile production down
+# Stop
+docker-compose -f docker-compose.chat.yml down
+
+# Rebuild and start
+docker-compose -f docker-compose.chat.yml up -d --build chat-server-prod
 ```
 
-## Health Checks
+`docker-compose.yml` (project root) defines an equivalent single `chat-server` service
+for a standalone (non-dev) run.
 
-All containers include health checks:
+## Health Check
 
-- **Development**: http://localhost:5000/health
-- **Production**: http://localhost:5001/health
+- http://localhost:5000/health (docker-compose.yml `chat-server`)
+- http://localhost:5001/health (docker-compose.chat.yml `chat-server-prod`, mapped to host port 5001)
 
 ## Volumes
 
 - **chat-logs**: Persistent storage for application logs
 - **chat-cache**: Persistent storage for cache data
-- **Source code mounts** (development only): For hot reload
 
 ## Security Features
 
-1. **Non-root user**: All containers run as non-root user
-2. **Multi-stage builds**: Reduce attack surface
-3. **Minimal base images**: Python slim images
-4. **Health checks**: Container monitoring
-5. **Resource limits**: Configurable via Docker Compose
+1. **Non-root user**: container runs as a non-root user
+2. **Multi-stage build**: reduces attack surface / image size
+3. **Minimal base image**: Python slim
+4. **Health check**: container monitoring
+5. **Resource limits**: configurable via Docker Compose
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Port conflicts**: Change ports in docker-compose.chat.yml
-2. **Permission issues**: Ensure proper volume permissions
-3. **Memory issues**: Adjust Cross Encoder batch size in environment variables
-4. **Build failures**: Try building with --no-cache
+1. **Port conflicts**: change the port mapping in `docker-compose.chat.yml` / `docker-compose.yml`
+2. **Build failures**: try building with `--no-cache`
+3. **`ModuleNotFoundError: No module named 'models'`**: make sure `PYTHONPATH=/app/src`
+   is set (already baked into `aws/Dockerfile.production`) - `python api/chat_server.py`
+   only adds its own directory to `sys.path`, not the working directory, so the
+   `models`/`services`/`core` packages under `src/` need `PYTHONPATH` to resolve.
 
 ### Debug Commands
 
@@ -215,19 +124,13 @@ docker exec -it <container-name> /bin/bash
 docker inspect <container-name> | grep Health -A 10
 ```
 
-## Performance Optimization
-
-1. **Production builds**: Use multi-stage Dockerfiles
-2. **Cache optimization**: Proper layer ordering
-3. **Resource limits**: Set appropriate CPU and memory limits
-4. **Model optimization**: Configure Cross Encoder batch size based on available resources
-
 ## Deployment
 
-For production deployment, consider:
+For production deployment on AWS, see `aws/README.md`-equivalent tooling:
 
-- Using a container registry (ECR, Docker Hub)
-- Container orchestration (ECS, Kubernetes)
-- Load balancing and auto-scaling
-- Monitoring and logging integration
-- Secrets management for environment variables
+- `aws/cloudformation-infrastructure.yaml` - ECS/VPC/IAM infrastructure
+- `aws/codebuild-infrastructure.yaml` - CodeBuild CI/CD project (inline buildspec builds `aws/Dockerfile.production`)
+- `aws/deploy-to-ecs.sh` - deploy a built image to ECS
+- `aws/setup-codebuild.sh` - one-time CodeBuild/ECR/SSM setup
+
+For Hugging Face Spaces, see `README_HUGGINGFACE.md`.

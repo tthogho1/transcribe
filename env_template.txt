@@ -19,7 +19,7 @@ AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
 AWS_DEFAULT_REGION=your-aws-region
 AWS_REGION=your-aws-region
-SQS_QUEUE_URL=your-sqs-queue-url
+# SQS_QUEUE_URL=your-sqs-queue-url
 S3_BUCKET_NAME=your-s3-bucket-name
 
 # YouTube DynamoDB table (used by Gladia transcription scripts)

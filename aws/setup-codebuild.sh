@@ -5,6 +5,11 @@
 
 set -e
 
+# Run from this script's own directory (aws/) so the relative
+# codebuild-infrastructure.yaml reference below resolves regardless of the
+# caller's current directory.
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 # Configuration
 PROJECT_NAME="transcribe-service"
 ENVIRONMENT="production"

@@ -48,6 +48,7 @@ phases:
       # Build the Docker image with build arguments
       - |
         docker build \
+          -f aws/Dockerfile.production \
           --build-arg BUILDKIT_INLINE_CACHE=1 \
           --cache-from $REPOSITORY_URI:latest \
           -t $IMAGE_REPO_NAME:$IMAGE_TAG \

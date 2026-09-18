@@ -77,5 +77,6 @@ Jenkinsfile
 
 # その他の不要ファイル
 env_template.txt
-.env.example
+.env
+.env.*
 ecs-task-definition.json
