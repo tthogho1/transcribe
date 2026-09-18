@@ -13,7 +13,7 @@
 - DynamoDB から `embedding` が未設定/false の `video_id` を抽出
 - S3 から `{video_id}_transcription.json` をダウンロード
 - AWS Transcribe / Gladia 形式の JSON からテキストを抽出
-- `ConversationVectorizer.process_monologue` でベクトル化し Zilliz Cloud に保存
+- `ConversationVectorizer.process_monologue_bm25` でベクトル化し Zilliz Cloud (BM25 コレクション) に保存
 - DynamoDB の `embedding` フラグと `embedding_updated_at` を更新
 - ドライランモード・バッチサイズ指定・ログレベル指定に対応
 
@@ -37,59 +37,6 @@ python scripts/generate_embeddings_with_vectorizer.py --log-level DEBUG
 - `S3_TRANSCRIPT_BUCKET` または `S3_BUCKET_NAME`
 - `ZILLIZ_URI`, `ZILLIZ_TOKEN`
 
-### `fit_tfidf_from_s3.py`
-
-目的: S3 上の転写 JSON ファイル群からテキストを収集し、`TfidfSparseVectorizer` をコーパス全体で fit して、joblib で保存します。
-
-機能:
-
-- `S3JsonTextExtractor` で JSON からテキスト抽出 (AWS Transcribe / Gladia / 汎用)
-- `TextProcessor` でチャンク分割
-- `TfidfSparseVectorizer.fit_transform` で語彙を学習し、`joblib.dump` で保存
-- バケット/プレフィックス/最大ファイル数/チャンク設定/ログレベルの指定
-
-使用例 (PowerShell):
-
-```
-# 環境変数を使う場合
-$env:S3_BUCKET_NAME = "your-bucket"
-$env:S3_TRANSCRIPT_PREFIX = "transcripts/"   # 任意
-$env:TFIDF_MODEL_PATH = "artifacts/tfidf_vectorizer.joblib"  # 任意
-python scripts/fit_tfidf_from_s3.py
-
-# 直接引数で指定
-python scripts/fit_tfidf_from_s3.py --bucket your-bucket --prefix transcripts/ --model-path artifacts/tfidf_vectorizer.joblib --chunk-size 300 --chunk-overlap 50 --max-files 0 --log-level INFO
-```
-
-注意:
-
-- `joblib` が必要です (`pip install joblib`)
-- モデルファイルには `TfidfSparseVectorizer` のインスタンスが保存されます
-- 既存サービス側で `joblib.load` により読み込み、`transform` に利用できます
-
-### `rebuild_sparse_vectors.py`
-
-目的: 保存済み TF‑IDF モデル（`.env: TFIDF_MODEL_PATH`）を読み込み、Zilliz Cloud コレクション内の全レコードの `text` から `sparse_vector` を再計算し、上書きします。
-
-前提:
-
-- `.env` に `ZILLIZ_URI`, `ZILLIZ_TOKEN`, `TFIDF_MODEL_PATH` が設定されていること
-- コレクション名は `ZILLIZ_COLLECTION`（未設定時は `conversation_chunks_hybrid`）
-
-使用例 (PowerShell):
-
-```
-python scripts/rebuild_sparse_vectors.py
-```
-
-オプション:
-
-- `SPARSE_REBUILD_BATCH` バッチサイズ（デフォルト 500）
-
-注意:
-
-- 環境によっては `query_iterator` か `offset` が使用できない場合があります。エラーが出た場合は PyMilvus/サーバーのバージョン更新をご検討ください。
-
 ### `add_embedding_attribute.py`
 
 **目的**: DynamoDB テーブル内の全項目に新規属性`embedding`を追加
@@ -105,33 +52,18 @@ python scripts/rebuild_sparse_vectors.py
 **使用方法**:
 
 ```bash
-# 1. 環境確認・テスト実行
-python scripts/test_embedding_script.py
-
-# 2. ドライランでプレビュー
+# 1. ドライランでプレビュー
 python scripts/add_embedding_attribute.py --dry-run
 
-# 3. 実際の更新実行
+# 2. 実際の更新実行
 python scripts/add_embedding_attribute.py
 
-# 4. カスタムテーブル名での実行
+# 3. カスタムテーブル名での実行
 python scripts/add_embedding_attribute.py --table-name MyTable
 
-# 5. デバッグモード
+# 4. デバッグモード
 python scripts/add_embedding_attribute.py --log-level DEBUG
 ```
-
-### `test_embedding_script.py`
-
-**目的**: `add_embedding_attribute.py`のテストと環境確認
-
-**機能**:
-
-- AWS 認証情報の確認
-- DynamoDB 接続テスト
-- サンプルデータの分析
-- ドライランテスト
-- 使用例の表示
 
 ## 環境設定
 
@@ -155,36 +87,7 @@ pip install boto3 python-dotenv
 
 ## 実行例
 
-### 1. 環境テスト
-
-```bash
-cd c:\temp\SourceCode\transcribe
-python scripts/test_embedding_script.py
-```
-
-**出力例**:
-
-```
-🧪 DynamoDB Embedding Attribute Updater - Test Suite
-============================================================
-🔍 Environment Variables Check:
-   ✅ AWS_ACCESS_KEY_ID: AKIA**********...
-   ✅ AWS_SECRET_ACCESS_KEY: **********...
-   ✅ AWS_REGION: ap-northeast-1
-   ✅ DYNAMO_TABLE_NAME: YoutubeList
-
-🔗 DynamoDB Connection Test:
-   ✅ Successfully connected to table: YoutubeList
-   ✅ Region: ap-northeast-1
-
-📊 Sample Data Scan Test:
-   📋 Found 5 sample items
-   🔍 Sample item keys: ['video_id', 'title', 'transcribed', 'created_at']
-   🏷️  Sample transcribed value: 1
-   🧠 Has embedding attribute: False
-```
-
-### 2. ドライラン実行
+### 1. ドライラン実行
 
 ```bash
 python scripts/add_embedding_attribute.py --dry-run
@@ -219,7 +122,7 @@ python scripts/add_embedding_attribute.py --dry-run
 🎉 [DRY RUN] All items updated successfully!
 ```
 
-### 3. 実際の更新実行
+### 2. 実際の更新実行
 
 ```bash
 python scripts/add_embedding_attribute.py

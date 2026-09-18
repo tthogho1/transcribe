@@ -14,22 +14,6 @@ OPENAI_MODEL=gpt-3.5-turbo
 OPENAI_MAX_TOKENS=1000
 OPENAI_TEMPERATURE=0.7
 
-# Optional: Cohere Configuration (for reranking)
-COHERE_API_KEY=your-cohere-api-key
-
-# Reranking Configuration
-RERANK_METHOD=cross_encoder
-# Options: "cohere", "cross_encoder", or leave empty to disable
-
-# Cross Encoder Configuration (CPU optimization)
-CROSS_ENCODER_DEVICE=auto
-# Options: "cpu", "cuda", "auto"
-CROSS_ENCODER_BATCH_SIZE=8
-CROSS_ENCODER_MAX_LENGTH=512
-
-# Search Configuration
-INITIAL_SEARCH_MULTIPLIER=3
-
 # AWS Configuration (if using S3 data extraction)
 AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
@@ -38,6 +22,5 @@ AWS_REGION=your-aws-region
 SQS_QUEUE_URL=your-sqs-queue-url
 S3_BUCKET_NAME=your-s3-bucket-name
 
-# YouTube API Server Configuration
-YOUTUBE_API_PORT=5001
+# YouTube DynamoDB table (used by Gladia transcription scripts)
 YOUTUBE_DYNAMODB_TABLE=youtube_videos

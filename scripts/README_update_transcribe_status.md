@@ -165,20 +165,6 @@ python scripts/update_transcribe_status.py --dry-run --log-level DEBUG
 python scripts/update_transcribe_status.py --log-level DEBUG --dry-run
 ```
 
-## 🧪 テスト
-
-環境確認とテストスクリプトを実行：
-
-```bash
-python scripts/test_update_script.py
-```
-
-このテストスクリプトは以下を確認します：
-
-- 環境変数の設定状況
-- 使用例の表示
-- スクリプトの機能説明
-
 ## 📞 サポート
 
 問題が発生した場合は、以下の情報と共にお問い合わせください：

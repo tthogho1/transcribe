@@ -2,58 +2,22 @@
 Text processing utilities for conversation analysis
 """
 
-import os
 from datetime import datetime
 from typing import List, Dict, Any
-# from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from models.conversation_chunk import ConversationChunk
 
 
 class JapaneseTokenizer:
-    """Japanese text tokenizer using MeCab"""
-
-    def __init__(self, enable_mecab: bool = False):
-        """Initialize MeCab tokenizer"""
-        self.mecab = None
-        if enable_mecab:
-            self._initialize_mecab()
-        else:
-            print("ℹ️ [JapaneseTokenizer] MeCab disabled ")
-
-    def _initialize_mecab(self):
-        """Initialize MeCab if available"""
-        try:
-            import MeCab
-
-            print("🔧 [JapaneseTokenizer] Initializing MeCab...")
-            self.mecab = MeCab.Tagger("-Owakati")
-            print("✅ [JapaneseTokenizer] MeCab tokenizer initialized")
-        except ImportError:
-            print(
-                "⚠️ [JapaneseTokenizer] MeCab not available, using default tokenization"
-            )
-        except Exception as e:
-            print(f"❌ [JapaneseTokenizer] MeCab initialization failed: {e}")
-            self.mecab = None
+    """
+    Pass-through placeholder tokenizer. The embedding model (ruri-v3) and the
+    BM25 analyzer (lindera, configured server-side in ZillizBM25Client) each
+    handle their own tokenization, so no separate Japanese tokenization step
+    (MeCab/fugashi) is needed here.
+    """
 
     def tokenize(self, text: str) -> str:
-        """
-        Tokenize Japanese text using MeCab
-        Args:
-            text: Input text
-        Returns:
-            Tokenized text
-        """
-        if self.mecab:
-            try:
-                return self.mecab.parse(text).strip()
-            except Exception as e:
-                print(f"⚠️ MeCab tokenization error: {e}")
-                return text
-        else:
-            # Simple fallback tokenization
-            return text
+        return text
 
 
 class TextChunker:
@@ -124,7 +88,7 @@ class TextChunker:
             for i, chunk_text in enumerate(text_chunks):
                 chunks.append(
                     ConversationChunk(
-                        id=f"chunk_{chunk_id:06d}",
+                        id=f"{file_name}_chunk_{chunk_id:06d}",
                         text=chunk_text,
                         speaker=utterance["speaker"],
                         timestamp=utterance["timestamp"],
@@ -148,9 +112,7 @@ class TextProcessor:
             chunk_size: Maximum chunk size in characters
             chunk_overlap: Overlap size in characters
         """
-        self.tokenizer = JapaneseTokenizer(
-            enable_mecab=False
-        )  # Disable MeCab in JapaneseTokenizer
+        self.tokenizer = JapaneseTokenizer()
         self.chunker = TextChunker(chunk_size, chunk_overlap)
 
     def process_text(self, text: str, file_name: str) -> List[ConversationChunk]:
