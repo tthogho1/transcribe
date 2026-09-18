@@ -1,13 +1,13 @@
-# 🤗 Hugging Face Spaces デプロイガイド（CPU 無料版最適化）
+# 🤗 Hugging Face Spaces デプロイガイド（CPU 無料版）
 
-この README は、Chat Server を Hugging Face Spaces（Docker CPU Free Tier）にデプロイする手順を説明します。
+この README は、Chat Server（BM25 + Ruri v3 によるハイブリッド RAG 検索）を
+Hugging Face Spaces（Docker SDK, CPU Free Tier）にデプロイする手順を説明します。
 
 ## 📋 前提条件
 
 - Hugging Face アカウント
-- Zilliz Cloud アカウント（ベクトルデータベース）
+- Zilliz Cloud アカウント（ベクトルデータベース、`conversation_chunks_bm25` コレクションにデータ投入済みであること）
 - OpenAI API キー
-- （オプション）Cohere API キー（リランキング用）
 
 ## ⚠️ CPU 無料版の制約
 
@@ -17,13 +17,10 @@ Hugging Face Spaces の CPU 無料版では以下の制約があります：
 - **メモリ**: 約 16GB
 - **ストレージ**: 限定的
 - **ビルド時間**: 制限あり
-- **初回起動**: モデルダウンロードで 2-5 分
+- **初回起動**: 依存パッケージのビルドと埋め込みモデル（`cl-nagoya/ruri-v3-310m`, 約 1.2GB）のダウンロードで 2-5 分
 
-**最適化内容**:
-
-- PyTorch CPU 版を使用（~1.8GB 削減）
-- バッチサイズを小さく設定（メモリ削減）
-- 並列処理を制限（CPU 負荷軽減）
+`Dockerfile.hfspaces` は CPU 専用の PyTorch ホイールを明示的にインストールすることで、
+デフォルトの CUDA 同梱ビルドよりイメージサイズとビルド時間を削減しています。
 
 ## 🚀 デプロイ手順
 
@@ -44,55 +41,51 @@ Hugging Face Spaces の CPU 無料版では以下の制約があります：
 ```
 transcribe/
 ├── Dockerfile              # Dockerfile.hfspaces をリネーム
-├── requirements.txt        # requirements.hf.txt をリネーム（CPU最適化版）
+├── requirements.txt
 ├── .dockerignore           # ビルドサイズ削減用
-├── src/
-│   ├── api/
-│   │   └── chat_server.py
-│   ├── core/
-│   ├── services/
-│   ├── models/
-│   └── templates/
-└── artifacts/
-    └── tfidf_vectorizer.joblib
+└── src/
+    ├── api/
+    │   └── chat_server.py
+    ├── core/
+    ├── services/
+    ├── models/
+    ├── templates/
+    └── static/
 ```
 
-**重要**: 以下のファイル名を変更してアップロード
+**重要**: `Dockerfile.hfspaces` を `Dockerfile` にリネームしてアップロードしてください。
+`requirements.txt` はプロジェクトのものをそのまま使用できます（CPU 最適化は Dockerfile 側で行うため、別ファイルは不要です）。
 
-- `Dockerfile.hfspaces` → `Dockerfile`
-- `requirements.hf.txt` → `requirements.txt`
+`.env` ファイルはアップロードしないでください（`.dockerignore` で除外済みです）。
+シークレットは次の手順で Space 側の機能を使って設定します。
 
 ### 3. 環境変数の設定
 
-Hugging Face Spaces の設定画面で以下のシークレットを追加:
+Hugging Face Spaces の設定画面（Settings → Repository secrets）で以下を追加:
 
 #### 必須の環境変数
 
 | 変数名           | 説明                        | 例                                             |
-| ---------------- | --------------------------- | ---------------------------------------------- |
-| `ZILLIZ_URI`     | Zilliz Cloud エンドポイント | `https://xxx.api.gcp-us-west1.zillizcloud.com` |
-| `ZILLIZ_TOKEN`   | Zilliz Cloud 認証トークン   | `xxxxxxxxxxxxxxxx`                             |
-| `OPENAI_API_KEY` | OpenAI API キー             | `sk-xxxxxxxxxxxxxxxx`                          |
+| ---------------- | --------------------------- | ----------------------------------------------- |
+| `ZILLIZ_URI`     | Zilliz Cloud エンドポイント | `https://xxx.serverless.xxx.cloud.zilliz.com`   |
+| `ZILLIZ_TOKEN`   | Zilliz Cloud 認証トークン   | `xxxxxxxxxxxxxxxx`                              |
+| `OPENAI_API_KEY` | OpenAI API キー             | `sk-xxxxxxxxxxxxxxxx`                           |
 
 #### オプションの環境変数
 
-| 変数名                     | 説明                              | デフォルト値    |
-| -------------------------- | --------------------------------- | --------------- |
-| `OPENAI_MODEL`             | 使用する OpenAI モデル            | `gpt-3.5-turbo` |
-| `OPENAI_MAX_TOKENS`        | 最大トークン数                    | `2000`          |
-| `OPENAI_TEMPERATURE`       | 温度パラメータ                    | `0.7`           |
-| `COHERE_API_KEY`           | Cohere API キー（リランキング用） | -               |
-| `RERANK_METHOD`            | リランキング方法                  | `cross_encoder` |
-| `CROSS_ENCODER_DEVICE`     | デバイス設定                      | `cpu`           |
-| `CROSS_ENCODER_BATCH_SIZE` | バッチサイズ                      | `4`             |
-| `FLASK_PORT`               | ポート番号                        | `7860`          |
-| `FLASK_DEBUG`              | デバッグモード                    | `False`         |
+| 変数名                | 説明                    | デフォルト値    |
+| --------------------- | ----------------------- | --------------- |
+| `OPENAI_MODEL`         | 使用する OpenAI モデル  | `gpt-3.5-turbo` |
+| `OPENAI_MAX_TOKENS`    | 最大トークン数           | `2000`          |
+| `OPENAI_TEMPERATURE`   | 温度パラメータ           | `0.7`           |
+| `FLASK_PORT`           | ポート番号               | `7860`          |
+| `FLASK_DEBUG`          | デバッグモード           | `False`         |
 
 ### 4. デプロイ
 
 1. ファイルをアップロードまたは Git push でデプロイ
 2. Hugging Face Spaces が自動的に Docker イメージをビルド
-3. 初回ビルドには 5-10 分程度かかります（依存パッケージとモデルのダウンロード）
+3. 初回ビルドには 5-10 分程度かかります（依存パッケージと埋め込みモデルのダウンロード）
 
 ### 5. 動作確認
 
@@ -112,7 +105,7 @@ curl -X POST https://YOUR_SPACE_URL/api/chat \
   -H "Content-Type: application/json" \
   -d '{"query": "質問内容"}'
 
-# 検索のみ
+# 検索のみ（BM25ハイブリッド検索）
 curl -X POST https://YOUR_SPACE_URL/api/search \
   -H "Content-Type: application/json" \
   -d '{"query": "検索クエリ", "limit": 5}'
@@ -137,51 +130,12 @@ socket.on('chat_response', data => {
 
 ## ⚙️ CPU 無料版向けパフォーマンス最適化
 
-### 環境変数の推奨設定（CPU 無料版）
+`Dockerfile.hfspaces` には CPU 負荷を抑えるための環境変数
+（`OMP_NUM_THREADS=2`, `MKL_NUM_THREADS=2`, `TOKENIZERS_PARALLELISM=false`）が
+すでに設定されています。追加で調整したい場合:
 
-CPU 無料版では以下の設定を**強く推奨**します：
-
-```env
-# CPU最適化（必須）
-CROSS_ENCODER_DEVICE=cpu
-CROSS_ENCODER_BATCH_SIZE=4
-CROSS_ENCODER_MAX_LENGTH=256
-
-# 検索最適化（メモリ削減）
-INITIAL_SEARCH_MULTIPLIER=2
-
-# スレッド制限（CPU負荷軽減）
-OMP_NUM_THREADS=2
-MKL_NUM_THREADS=2
-TOKENIZERS_PARALLELISM=false
-```
-
-これらの設定は `Dockerfile.hfspaces` に既に含まれています。
-
-### 応答速度を上げる追加設定
-
-CPU 無料版で応答を高速化したい場合：
-
-1. **リランキングを無効化**: `RERANK_METHOD=`（空文字列）
-
-   - 応答速度: 2-3 秒 → 1-2 秒
-   - 精度: わずかに低下
-
-2. **検索結果数を削減**: API 呼び出し時に `limit=3` を指定
-
-   - デフォルトの 5 件から 3 件に削減
-
-3. **OpenAI モデルを変更**: `OPENAI_MODEL=gpt-3.5-turbo`（既定）
-   - GPT-4 を使用している場合は 3.5-turbo に変更
-
-### メモリ不足エラーの対処
-
-もしメモリ不足エラーが発生する場合：
-
-```env
-CROSS_ENCODER_BATCH_SIZE=2  # さらに削減
-INITIAL_SEARCH_MULTIPLIER=1  # 検索倍率を最小に
-```
+- **検索結果数を削減**: API 呼び出し時に `limit=3` を指定（デフォルトの 5 件から削減）
+- **OpenAI モデルを変更**: `OPENAI_MODEL=gpt-3.5-turbo`（既定。GPT-4 系より高速）
 
 ## 🐛 トラブルシューティング
 
@@ -191,39 +145,19 @@ INITIAL_SEARCH_MULTIPLIER=1  # 検索倍率を最小に
 **原因**: ビルド時間制限超過またはメモリ不足
 **対処**:
 
-- `requirements.hf.txt` が使用されているか確認（CPU 最適化版）
+- `Dockerfile.hfspaces` を `Dockerfile` にリネームしてアップロードしているか確認
 - `.dockerignore` が正しく設定されているか確認
-- 不要なファイル（`typescript/`, `downloads/`等）を削除
+- 不要なファイル（`typescript/`, `downloads/`, `scripts/`, `lambda/` 等）がアップロードされていないか確認
 
 ### 起動が遅い・タイムアウトする
 
 **症状**: アプリケーションの起動に 5 分以上かかる
-**原因**: モデルの初回ダウンロード
+**原因**: 埋め込みモデル（`cl-nagoya/ruri-v3-310m`, 約 1.2GB）の初回ダウンロード
 **対処**:
 
 - **正常な動作です**。初回は 2-5 分かかります
-- 2 回目以降はキャッシュされ、30 秒程度で起動します
+- Space に永続ストレージを設定していない場合、Space の再ビルドのたびに再ダウンロードが発生します
 - Hugging Face Spaces のログで進捗を確認できます
-
-### 応答が非常に遅い（10 秒以上）
-
-**症状**: チャット応答に 10 秒以上かかる
-**原因**: CPU でのリランキング処理
-**対処**:
-
-- リランキングを無効化: `RERANK_METHOD=`
-- バッチサイズを削減: `CROSS_ENCODER_BATCH_SIZE=2`
-- 検索結果数を削減: `limit=3` を指定
-
-### MeCab エラー
-
-**症状**: MeCab 関連のエラーメッセージ
-**原因**: システムパッケージ未インストール
-**対処**:
-
-- `Dockerfile.hfspaces` を使用しているか確認
-- Dockerfile に `mecab`、`libmecab-dev`、`mecab-ipadic-utf8` が含まれているか確認
-- **フォールバック機能**: コードには既に MeCab 不要時のフォールバック処理が実装されています
 
 ### 接続エラー / Zilliz エラー
 
@@ -236,7 +170,7 @@ INITIAL_SEARCH_MULTIPLIER=1  # 検索倍率を最小に
    - `ZILLIZ_URI`
    - `ZILLIZ_TOKEN`
    - `OPENAI_API_KEY`
-3. `/health` エンドポイントで各サービスの状態を確認
+3. `/health` エンドポイントで各サービスの状態を確認（`zilliz: "connected"` になっているか）
 
 ### Space がスリープ状態になる
 
@@ -249,19 +183,18 @@ INITIAL_SEARCH_MULTIPLIER=1  # 検索倍率を最小に
 
 ## 📦 含まれるコンポーネント
 
-- **Flask**: Web サーバー
-- **Socket.IO**: リアルタイム双方向通信
-- **Sentence Transformers**: 日本語埋め込みモデル（CPU 最適化）
-- **Cross Encoder**: リランキング（CPU 最適化済み、バッチサイズ削減）
-- **MeCab**: 日本語形態素解析（フォールバック機能付き）
+- **Flask + Socket.IO**: Web サーバー・リアルタイム双方向通信
+- **Sentence Transformers（cl-nagoya/ruri-v3-310m）**: 日本語埋め込みモデル（クエリ/文書非対称プレフィックス対応）
+- **Zilliz Cloud（ネイティブ BM25 Function）**: 密ベクトル + BM25 疎ベクトルのハイブリッド検索。
+  日本語トークナイズ（lindera/ipadic）は Zilliz Cloud 側で実行されるため、クライアント側に
+  MeCab 等の日本語形態素解析ライブラリは不要です
 - **OpenAI GPT**: 回答生成
-- **Zilliz Cloud**: ベクトルデータベース（密＋疎ハイブリッド検索）
 
 ## 🔒 セキュリティ
 
 - API キーは必ず Hugging Face Spaces のシークレット機能を使用
-- `.env`ファイルは`.gitignore`に追加（リポジトリにコミットしない）
-- 本番環境では`FLASK_DEBUG=False`を設定
+- `.env` ファイルはリポジトリにコミット・アップロードしない（`.dockerignore` で除外済み）
+- 本番環境では `FLASK_DEBUG=False` を設定
 
 ## 📄 ライセンス
 

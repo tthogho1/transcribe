@@ -634,11 +634,14 @@ if __name__ == "__main__":
     logger.info(f"Debug mode: {debug}")
     logger.info(f"Environment: {'Development' if debug else 'Production'}")
 
-    # Hugging Face Spaces対応: 本番環境ではallow_unsafe_werkzeugをFalseに
+    # This app is served directly by Flask-SocketIO's built-in Werkzeug server
+    # (no separate WSGI/ASGI server in front of it), so allow_unsafe_werkzeug
+    # must stay True even outside debug mode - otherwise socketio.run() raises
+    # RuntimeError and the server never starts.
     socketio.run(
         app,
         host="0.0.0.0",
         port=port,
         debug=debug,
-        allow_unsafe_werkzeug=debug,  # debugモードの時のみTrue
+        allow_unsafe_werkzeug=True,
     )
