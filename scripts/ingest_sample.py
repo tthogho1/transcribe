@@ -1,6 +1,6 @@
 """
-Ingest a small sample document to the Milvus collection using ConversationVectorizer.
-This will help fit the sparse TF-IDF vectorizer (sparse_vector) and ensure num_entities>0.
+Ingest a small sample document to the Milvus BM25 collection using ConversationVectorizer,
+to sanity-check the pipeline and ensure num_entities>0.
 
 Usage:
   & .venv/Scripts/Activate.ps1
@@ -23,7 +23,7 @@ if str(src_path) not in sys.path:
 
 from core.conversation_vectorizer import ConversationVectorizer
 
-SAMPLE_TEXT = "これはテスト用のサンプルテキストです。検索とスパースベクトルのフィッティングを行います。"
+SAMPLE_TEXT = "これはテスト用のサンプルテキストです。BM25検索の動作確認を行います。"
 
 
 def main():
@@ -44,15 +44,16 @@ def main():
 
     try:
         print("Processing sample monologue and inserting...", end=" ")
-        # process_monologue should chunk, vectorize, and insert to Milvus
-        # Signature: process_monologue(text: str, file_name: str)
-        chunks = cv.process_monologue(SAMPLE_TEXT, "sample.txt")
+        # process_monologue_bm25 chunks, generates dense embeddings, and inserts to Milvus
+        # (sparse vector is derived server-side by the BM25 function)
+        # Signature: process_monologue_bm25(text: str, file_name: str)
+        chunks = cv.process_monologue_bm25(SAMPLE_TEXT, "sample.txt")
         # Optionally flush/confirm entities in collection
         try:
             stats = cv.get_stats()
             print("\nInserted chunks:", len(chunks))
             print("Collection stats after insert:")
-            print(stats.get("zilliz_stats", {}))
+            print(stats.get("bm25_stats", {}))
         except Exception:
             pass
         print("✅ Inserted sample")

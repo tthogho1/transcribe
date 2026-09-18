@@ -17,8 +17,7 @@ if __name__ == "__main__":
 from models.conversation_chunk import ConversationChunk, SearchResult
 from services.processing.text_processor import TextProcessor
 from services.processing.vector_generator import HybridVectorGenerator
-from services.processing.tfidf_vectorizer import TfidfSparseVectorizer
-from services.database.zilliz_client import ZillizClient
+from services.database.zilliz_bm25_client import ZillizBM25Client
 from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
 from dotenv import load_dotenv, find_dotenv
@@ -34,20 +33,26 @@ class ConversationVectorizer:
         self,
         zilliz_uri: str,
         zilliz_token: str,
-        embedding_model: str = "sonoisa/sentence-bert-base-ja-mean-tokens-v2",
+        embedding_model: str = "cl-nagoya/ruri-v3-310m",
         chunk_size: int = 300,
         chunk_overlap: int = 50,
-        collection_name: str = "conversation_chunks_hybrid",
+        bm25_collection_name: str = "conversation_chunks_bm25",
+        dense_query_prefix: str = "検索クエリ: ",
+        dense_document_prefix: str = "検索文書: ",
     ):
         """
         Initialize conversation vectorizer
         Args:
             zilliz_uri: Zilliz Cloud URI
             zilliz_token: Zilliz Cloud token
-            embedding_model: SentenceTransformer model name
+            embedding_model: SentenceTransformer model name. Defaults to ruri-v3-310m
+                              (768D, matches the existing dense_vector schema).
             chunk_size: Chunk size in characters
             chunk_overlap: Overlap size in characters
-            collection_name: Zilliz collection name
+            bm25_collection_name: Zilliz collection name (dense + native BM25 sparse)
+            dense_query_prefix / dense_document_prefix: ruri-v3 uses asymmetric
+                              retrieval prefixes ("1+3 prefix scheme"); pass "" for
+                              models that don't use them.
         """
         # Initialize components
         print("🔧 Initializing TextProcessor...")
@@ -56,163 +61,87 @@ class ConversationVectorizer:
 
         print("🔧 Initializing HybridVectorGenerator...")
         self.vector_generator = HybridVectorGenerator(
-            dense_model=embedding_model, tokenizer=self.text_processor
+            dense_model=embedding_model,
+            tokenizer=self.text_processor,
+            dense_query_prefix=dense_query_prefix,
+            dense_document_prefix=dense_document_prefix,
         )
         print("✅ HybridVectorGenerator initialized")
 
-        print("🔧 Initializing ZillizClient...")
-        # Only initialize ZillizClient when URI is provided; allow running without Zilliz
+        print("🔧 Initializing ZillizBM25Client...")
         if zilliz_uri:
             try:
-                self.zilliz_client = ZillizClient(zilliz_uri, zilliz_token, collection_name)
-                print("✅ ZillizClient initialized")
-            except Exception as e:
-                print(f"⚠️ ZillizClient initialization failed: {e}")
-                self.zilliz_client = None
-        else:
-            print("⚠️ ZILLIZ_URI not provided - skipping ZillizClient initialization")
-            self.zilliz_client = None
-
-        # Initialize TF-IDF sparse vectorizer
-        print("🔧 Initializing TfidfSparseVectorizer...")
-        self.sparse_vectorizer = TfidfSparseVectorizer(
-            max_features=10000,
-            ngram_range=(1, 2),
-            min_df=1,
-            max_df=0.95,
-            use_mecab=True,  # Re-enable to see detailed error
-        )
-        print("✅ TfidfSparseVectorizer initialized")
-
-        # Try to load a pre-fitted TF-IDF model if specified
-        tfidf_model_path = os.getenv("TFIDF_MODEL_PATH")
-        if tfidf_model_path and os.path.exists(tfidf_model_path):
-            try:
-                self.sparse_vectorizer = TfidfSparseVectorizer.load_sklearn(
-                    tfidf_model_path,
-                    max_features=10000,
-                    ngram_range=(1, 2),
-                    min_df=1,
-                    max_df=0.95,
-                    use_mecab=True,
+                self.bm25_client = ZillizBM25Client(
+                    zilliz_uri, zilliz_token, bm25_collection_name
                 )
-                print(f"💾 Loaded TF-IDF model from: {tfidf_model_path}")
+                print("✅ ZillizBM25Client initialized")
             except Exception as e:
-                print(f"⚠️ Failed to load TF-IDF model ({tfidf_model_path}): {e}")
+                print(f"⚠️ ZillizBM25Client initialization failed: {e}")
+                self.bm25_client = None
+        else:
+            print("⚠️ ZILLIZ_URI not provided - skipping ZillizBM25Client initialization")
+            self.bm25_client = None
 
         print("✅ ConversationVectorizer initialized with all components")
 
-    def process_monologue(self, text: str, file_name: str) -> List[ConversationChunk]:
+    def process_monologue_bm25(
+        self, text: str, file_name: str
+    ) -> List[ConversationChunk]:
         """
-        Complete processing pipeline for monologue text
+        Complete processing pipeline for monologue text.
+        Only dense embeddings are computed client-side; the sparse vector is
+        derived automatically by Zilliz's BM25 function from the chunk text.
         Args:
             text: Monologue text
             file_name: Name of the file being processed
         Returns:
             List of processed chunks
         """
-        print("🔄 Starting hybrid monologue processing...")
+        print("🔄 Starting BM25 monologue processing...")
 
-        # 1. Process text into chunks
         chunks = self.text_processor.process_text(text, file_name)
 
-        # 2. Generate dense embeddings
         dense_embeddings = self.vector_generator.dense_generator.generate(
             [chunk.text for chunk in chunks]
         )
 
-        # 3. Generate sparse embeddings using TF-IDF
-        texts = [chunk.text for chunk in chunks]
-        if not self.sparse_vectorizer.is_fitted:
-            sparse_embeddings = self.sparse_vectorizer.fit_transform(texts)
-        else:
-            sparse_embeddings = self.sparse_vectorizer.transform(texts)
-
-        # 4. Create embeddings result
-        from models.conversation_chunk import EmbeddingResult
-
-        embeddings = EmbeddingResult(
-            dense_embeddings=dense_embeddings,
-            sparse_embeddings=sparse_embeddings,
-        )
-
-        # 5. Insert into Zilliz
-        if self.zilliz_client:
+        if self.bm25_client:
             try:
-                self.zilliz_client.insert_data(chunks, embeddings)
+                self.bm25_client.insert_data(chunks, dense_embeddings)
             except Exception as e:
-                print(f"⚠️ Skipped inserting data into Zilliz: {e}")
+                print(f"⚠️ Skipped inserting data into BM25 collection: {e}")
         else:
-            print("⚠️ Zilliz client not available - skipping data insertion")
+            print("⚠️ BM25 client not available - skipping data insertion")
 
-        print("🎉 Hybrid processing completed!")
+        print("🎉 BM25 processing completed!")
         return chunks
 
-    def hybrid_search(
+    def hybrid_search_bm25(
         self, query: str, limit: int = 5, rerank_k: int = 100
     ) -> List[SearchResult]:
         """
-        Perform hybrid search combining dense and sparse vectors
+        Perform hybrid search using the native-BM25 collection: dense ANN
+        combined server-side with BM25 full-text search on the raw query text.
         Args:
             query: Search query
             limit: Number of final results
-            rerank_k: Number of candidates for reranking
+            rerank_k: Number of candidates considered per side before fusion
         Returns:
             List of search results
         """
         try:
-            # Generate dense query embedding
+            if not self.bm25_client:
+                print("⚠️ BM25 client not available - hybrid BM25 search unavailable")
+                return []
+
             dense_query = (
                 self.vector_generator.dense_generator.generate_query_embedding(query)
             )
 
-            # Generate sparse query embedding using TF-IDF (fallback to dense if not fitted)
-            if not getattr(self.sparse_vectorizer, "is_fitted", False):
-                print("ℹ️ TF-IDF not fitted. Falling back to dense search.")
-                return self.search_similar(query, limit)
-            sparse_query = self.sparse_vectorizer.transform([query])[0]
-
-            # Perform hybrid search
-            if not self.zilliz_client:
-                print("⚠️ Zilliz client not available - hybrid search unavailable")
-                return []
-
-            results = self.zilliz_client.hybrid_search(
-                dense_query, sparse_query, limit, rerank_k
-            )
-            return results
+            return self.bm25_client.hybrid_search(dense_query, query, limit, rerank_k)
 
         except Exception as e:
-            print(f"❌ Hybrid search error: {e}")
-            # Fallback to dense search
-            return self.search_similar(query, limit)
-
-    def search_similar(self, query: str, limit: int = 5) -> List[SearchResult]:
-        """
-        Perform dense vector search (fallback method)
-        Args:
-            query: Search query
-            limit: Number of results to return
-        Returns:
-            List of search results
-        """
-        try:
-            # Generate dense query embedding only
-            dense_query = (
-                self.vector_generator.dense_generator.generate_query_embedding(query)
-            )
-
-            # Perform dense search
-            if not self.zilliz_client:
-                print("⚠️ Zilliz client not available - dense search unavailable")
-                return []
-
-            results = self.zilliz_client.dense_search(dense_query, limit)
-
-            return results
-
-        except Exception as e:
-            print(f"❌ Dense search error: {e}")
+            print(f"❌ BM25 hybrid search error: {e}")
             return []
 
     def get_stats(self) -> Dict:
@@ -222,16 +151,13 @@ class ConversationVectorizer:
             Dictionary containing statistics
         """
         return {
-            "zilliz_stats": self.zilliz_client.get_collection_stats(),
+            "bm25_stats": self.bm25_client.get_collection_stats() if self.bm25_client else {},
             "text_processor": {
                 "chunk_size": self.text_processor.chunker.chunk_size,
                 "chunk_overlap": self.text_processor.chunker.chunk_overlap,
-                "tokenizer_available": self.text_processor.tokenizer.mecab is not None,
             },
             "vector_generator": {
                 "dense_model": self.vector_generator.dense_generator.model_name,
-                # Reflect TF-IDF vectorizer fitted status
-                "sparse_fitted": getattr(self.sparse_vectorizer, "is_fitted", False),
             },
         }
 
@@ -270,19 +196,12 @@ def main():
             sample_monologue = result["extracted_texts"][0]["text"]
 
             # Process monologue
-            chunks = vectorizer.process_monologue(sample_monologue, json_file_key)
+            chunks = vectorizer.process_monologue_bm25(sample_monologue, json_file_key)
 
-        # Test searches
-        print("\n🔍 Hybrid Search test:")
-        hybrid_results = vectorizer.hybrid_search("仕事の楽しみ方", limit=3)
+        # Test search
+        print("\n🔍 BM25 Hybrid Search test:")
+        hybrid_results = vectorizer.hybrid_search_bm25("仕事の楽しみ方", limit=3)
         for i, result in enumerate(hybrid_results, 1):
-            print(
-                f"{i}. [{result.search_type}] {result.text[:100]}... (Score: {result.score:.3f})"
-            )
-
-        print("\n🔍 Dense Search test:")
-        dense_results = vectorizer.search_similar("仕事の楽しみ方", limit=3)
-        for i, result in enumerate(dense_results, 1):
             print(
                 f"{i}. [{result.search_type}] {result.text[:100]}... (Score: {result.score:.3f})"
             )
@@ -291,10 +210,9 @@ def main():
         print("\n📊 Vectorizer Stats:")
         stats = vectorizer.get_stats()
         print(
-            f"Collection entities: {stats['zilliz_stats'].get('num_entities', 'Unknown')}"
+            f"Collection entities: {stats['bm25_stats'].get('num_entities', 'Unknown')}"
         )
-        print(f"Tokenizer available: {stats['text_processor']['tokenizer_available']}")
-        print(f"Sparse vectorizer fitted: {stats['vector_generator']['sparse_fitted']}")
+        print(f"Chunk size: {stats['text_processor']['chunk_size']}")
 
     except Exception as e:
         print(f"❌ An error occurred: {e}")

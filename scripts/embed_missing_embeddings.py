@@ -314,7 +314,7 @@ def main():
                 print(f"  [DRY-RUN] Would embed {len(text)} chars")
             else:
                 # Use a consistent pseudo filename for tracking
-                vectorizer.process_monologue(text, f"{video_id}_transcription.json")
+                vectorizer.process_monologue_bm25(text, f"{video_id}_transcription.json")
             update_embedding_flag(table, video_id, args.dry_run)
             processed += 1
         except Exception as e:  # noqa

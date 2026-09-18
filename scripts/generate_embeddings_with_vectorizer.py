@@ -18,10 +18,11 @@ from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-# Ensure project root is on the path before importing local modules
+# Ensure src/ is on the path before importing local modules (core, services, models live there)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-if PROJECT_ROOT not in os.sys.path:
-    os.sys.path.insert(0, PROJECT_ROOT)
+SRC_ROOT = os.path.join(PROJECT_ROOT, "src")
+if SRC_ROOT not in os.sys.path:
+    os.sys.path.insert(0, SRC_ROOT)
 
 from core.conversation_vectorizer import ConversationVectorizer
 
@@ -312,7 +313,7 @@ class EmbeddingPipeline:
             return True
 
         try:
-            chunks = self.vectorizer.process_monologue(
+            chunks = self.vectorizer.process_monologue_bm25(
                 text, f"{video_id}_transcription.json"
             )
             success = bool(chunks)
