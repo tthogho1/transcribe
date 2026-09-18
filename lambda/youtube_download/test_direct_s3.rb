@@ -29,7 +29,7 @@ begin
   
   # テスト用のshort YouTube video ID
   # 実際のテストでは適切なvideo_idに変更してください
-  test_video_id = "dQw4w9WgXcQ"  # Rick Roll (短い動画)
+  test_video_id = "IXs0Z63MC0o"  # Rick Roll (短い動画)
   
   puts "🎬 Testing with video ID: #{test_video_id}"
   puts "⏳ This may take a few minutes depending on the video length..."

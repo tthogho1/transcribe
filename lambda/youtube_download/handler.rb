@@ -216,10 +216,14 @@ class YouTubeDownloader
       }
     end
     
-    # yt-dlpコマンドを構築（音声MP4用）
+    # yt-dlpコマンドを構築（音声用）
+    # android_vrクライアントはSABR-onlyでURLが欠落することがあるため、webクライアントを明示指定
     cmd = [
       yt_dlp_path,  # フルパスを使用
-      '--format', 'bestaudio[ext=mp4]/bestaudio[ext=m4a]/bestaudio',  # MP4を最優先
+      '--no-update',
+      '--format', 'bestaudio/best',  # 利用可能な最良の音声（フォーマット限定を緩和）
+      '--extractor-args', 'youtube:player_client=web',
+      '--extractor-args', 'youtube:skip=hls,dash',
       '--output', output_path,
       '--no-playlist',
       youtube_url
@@ -232,19 +236,18 @@ class YouTubeDownloader
     begin
       # yt-dlpコマンド実行
       _stdout, stderr, status = Open3.capture3(*cmd)
-      
-      if status.success?
-        # ダウンロードされたファイルを特定
-        downloaded_file = find_downloaded_file(video_id)
-        
+
+      # ダウンロードされたファイルの存在を優先して成功判定
+      downloaded_file = find_downloaded_file(video_id)
+      if status.success? || downloaded_file
         if downloaded_file
           puts "✅ Successfully downloaded: #{downloaded_file}"
-          
+
           # S3にアップロード（オプション）
           if ENV['UPLOAD_TO_S3'] == 'true'
             upload_to_s3(downloaded_file, video_id)
           end
-          
+
           {
             video_id: video_id,
             success: true,
@@ -252,11 +255,12 @@ class YouTubeDownloader
             message: "Download successful"
           }
         else
-          puts "⚠️ Download completed but file not found for: #{video_id}"
+          # yt-dlpは成功を返したがファイルが見つからない（想定外）
+          puts "⚠️ yt-dlp reported success but file not found for: #{video_id}"
           {
             video_id: video_id,
             success: false,
-            message: "Download completed but file not found"
+            message: "yt-dlp succeeded but output file not found"
           }
         end
       else
@@ -300,6 +304,7 @@ class YouTubeDownloader
       # まずファイル情報を取得してファイル名を決定
       info_cmd = [
         yt_dlp_path,
+        '--no-update',
         '--print', 'filename',
         '--format', 'bestaudio[ext=m4a]/bestaudio',
         '--no-playlist',
@@ -325,6 +330,7 @@ class YouTubeDownloader
       # yt-dlpから標準出力にストリーミング
       stream_cmd = [
         yt_dlp_path,
+        '--no-update',
         '--format', 'bestaudio[ext=m4a]/bestaudio',
         '--no-playlist',
         '--extractor-args', 'youtube:player_client=web',  # webクライアントのみ使用
@@ -533,15 +539,18 @@ class YouTubeDownloader
       s3_client = Aws::S3::Client.new(region: ENV['AWS_REGION'] || 'ap-northeast-1')
       
       File.open(file_path, 'rb') do |file|
-        key = "#{video_id}/#{File.basename(file_path)}"
-        
+        # Flat key (no video_id "folder" prefix) so downstream Gladia
+        # transcription scripts, which look up "#{video_id}#{ext}" at the
+        # bucket root, can find the uploaded file.
+        key = "#{video_id}#{File.extname(file_path)}"
+
         s3_client.put_object(
           bucket: @s3_bucket,
           key: key,
           body: file,
-          content_type: 'audio/mp4'
+          content_type: get_content_type(File.extname(file_path))
         )
-        
+
         puts "📤 Uploaded to S3: s3://#{@s3_bucket}/#{key}"
       end
       
