@@ -5,6 +5,11 @@
 
 set -e
 
+# Run from this script's own directory (aws/) so the relative
+# ecs-task-definition.json reference below resolves regardless of the
+# caller's current directory.
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 # Default values
 ENVIRONMENT=${1:-production}
 AWS_REGION=${2:-ap-northeast-1}

@@ -28,12 +28,17 @@ TRANSCRIBE_OUTPUT_BUCKET=audio4gladia
 
 ## 実行方法
 
+`GladiaTranscribe.py`の`GladiaTranscriber`クラスはSQSに依存せず、
+`scripts/gladia_transcribe/`からも直接利用されています。
+SQSキューを監視して継続的に処理するワーカーとして実行する場合は、
+`src/services/aws/gladia_sqs_worker.py`を使用してください。
+
 ```bash
 # 必要なPythonパッケージをインストール
 pip install boto3 requests python-dotenv
 
-# スクリプト実行
-python src/services/aws/GladiaTranscribe.py
+# SQSワーカーとして実行
+python src/services/aws/gladia_sqs_worker.py
 ```
 
 ## 処理フロー
@@ -120,7 +125,7 @@ AWS TranscribeWorker と同時実行可能：
 python src/services/aws/AmazonTranscribe.py
 
 # ターミナル2: Gladia Transcribe Worker
-python src/services/aws/GladiaTranscribe.py
+python src/services/aws/gladia_sqs_worker.py
 ```
 
 両方のワーカーが同じ SQS キューを監視し、先に処理できた方が転写を実行します。

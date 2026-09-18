@@ -4,8 +4,8 @@ pipeline {
     stage('Build Docker Image') {
       steps {
         script {
-          // Dockerfileがある場所で
-          docker.build('chat:latest', '.')
+          // Build context is the repo root; the Dockerfile lives in aws/
+          docker.build('chat:latest', '-f aws/Dockerfile.production .')
         }
       }
     }
