@@ -136,6 +136,7 @@ class ZillizBM25Client:
                 FieldSchema(name="chunk_index", dtype=DataType.INT64),
                 FieldSchema(name="original_length", dtype=DataType.INT64),
                 FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=500),
+                FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=500),
             ]
 
             bm25_function = Function(
@@ -209,6 +210,7 @@ class ZillizBM25Client:
             [chunk.chunk_index for chunk in chunks],
             [chunk.original_length for chunk in chunks],
             [chunk.file_name for chunk in chunks],
+            [chunk.title for chunk in chunks],
         ]
 
         try:
@@ -235,7 +237,7 @@ class ZillizBM25Client:
                 print("❌ Hybrid search error: collection is not initialized")
                 return []
 
-            out_fields = ["text", "speaker", "timestamp", "file_name"]
+            out_fields = ["text", "speaker", "timestamp", "file_name", "title"]
 
             dense_req = AnnSearchRequest(
                 data=dense_query,
@@ -275,7 +277,7 @@ class ZillizBM25Client:
                 anns_field="sparse_vector",
                 param={"metric_type": "BM25", "params": {}},
                 limit=limit,
-                output_fields=["text", "speaker", "timestamp", "file_name"],
+                output_fields=["text", "speaker", "timestamp", "file_name", "title"],
             )
             return self._to_search_results(results, "bm25")
 
@@ -297,6 +299,7 @@ class ZillizBM25Client:
                     score=float(hit.score),
                     similarity=float(hit.score),
                     search_type=search_type,
+                    title=hit.entity.get("title", ""),
                 )
             )
         return search_results

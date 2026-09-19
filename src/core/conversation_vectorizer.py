@@ -85,7 +85,7 @@ class ConversationVectorizer:
         print("✅ ConversationVectorizer initialized with all components")
 
     def process_monologue_bm25(
-        self, text: str, file_name: str
+        self, text: str, file_name: str, title: str = ""
     ) -> List[ConversationChunk]:
         """
         Complete processing pipeline for monologue text.
@@ -94,12 +94,14 @@ class ConversationVectorizer:
         Args:
             text: Monologue text
             file_name: Name of the file being processed
+            title: Human-readable title (e.g. YouTube video title) stored
+                   alongside each chunk for display in search results
         Returns:
             List of processed chunks
         """
         print("🔄 Starting BM25 monologue processing...")
 
-        chunks = self.text_processor.process_text(text, file_name)
+        chunks = self.text_processor.process_text(text, file_name, title)
 
         dense_embeddings = self.vector_generator.dense_generator.generate(
             [chunk.text for chunk in chunks]

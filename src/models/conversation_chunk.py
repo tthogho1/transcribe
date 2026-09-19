@@ -17,6 +17,7 @@ class ConversationChunk:
     chunk_index: int
     original_length: int
     file_name: str
+    title: str = ""
 
 
 @dataclass
@@ -30,6 +31,7 @@ class SearchResult:
     score: float
     similarity: float
     search_type: str
+    title: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -41,6 +43,7 @@ class SearchResult:
             "score": self.score,
             "similarity": self.similarity,
             "search_type": self.search_type,
+            "title": self.title,
         }
 
 

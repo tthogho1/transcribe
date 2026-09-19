@@ -314,7 +314,7 @@ class EmbeddingPipeline:
 
         try:
             chunks = self.vectorizer.process_monologue_bm25(
-                text, f"{video_id}_transcription.json"
+                text, f"{video_id}_transcription.json", title=record.title or ""
             )
             success = bool(chunks)
         except Exception as exc:

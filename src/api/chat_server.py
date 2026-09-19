@@ -6,10 +6,11 @@ Provides RAG (Retrieval-Augmented Generation) functionality for conversation sea
 import os
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from typing import List, Dict, Any
+from dataclasses import dataclass, field
 
 from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
@@ -62,6 +63,7 @@ class ChatResponse:
     timestamp: str
     tokens_used: int
     file_names: List[str]  # New field to store file names
+    related_videos: List[Dict[str, str]] = field(default_factory=list)
 
 
 class OpenAIGenerator:
@@ -261,6 +263,24 @@ class ChatService:
         """Search relevant conversation chunks via BM25 hybrid search"""
         return self.vectorizer.hybrid_search_bm25(query, limit=limit)
 
+    def get_related_videos(self, search_results: List[SearchResult]) -> List[Dict[str, str]]:
+        """
+        Build the "Related" video list directly from each SearchResult's
+        title (stored in the Zilliz collection at ingestion time), deduplicated
+        by video_id. Falls back to the video_id itself if a chunk predates the
+        title field.
+        """
+        seen = {}
+        for result in search_results:
+            video_id = re.sub(r"(_transcription)?\.json$", "", result.file_name)
+            if video_id not in seen:
+                seen[video_id] = {
+                    "video_id": video_id,
+                    "title": result.title or video_id,
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                }
+        return list(seen.values())
+
     def process_chat_query(
         self,
         query: str,
@@ -306,6 +326,7 @@ class ChatService:
 
             # Collect file names from search results
             file_names = list({result.file_name for result in search_results})
+            related_videos = self.get_related_videos(search_results)
 
             # Create chat response
             chat_response = ChatResponse(
@@ -315,6 +336,7 @@ class ChatService:
                 timestamp=datetime.now().isoformat(),
                 tokens_used=ai_response["tokens_used"],
                 file_names=file_names,  # Include file names
+                related_videos=related_videos,
             )
 
             return chat_response
@@ -402,6 +424,7 @@ def api_chat():
             "timestamp": response.timestamp,
             "tokens_used": response.tokens_used,
             "file_names": response.file_names,
+            "related_videos": response.related_videos,
             "user_id": user_id,  # Return user_id for client tracking
         }
         return Response(
@@ -616,6 +639,7 @@ def handle_chat_message(data):
                 "timestamp": response.timestamp,
                 "tokens_used": response.tokens_used,
                 "file_names": response.file_names,
+                "related_videos": response.related_videos,
             },
         )
 

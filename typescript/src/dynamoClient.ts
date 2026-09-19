@@ -135,13 +135,16 @@ export class YouTubeDynamoClient {
     );
 
     // embedding属性のカウントを取得
+    // Stored as a DynamoDB Number (0/1) by the Python ingestion pipeline,
+    // not a Boolean - must compare against :one/:zero, not true/false,
+    // or the FilterExpression never matches (type-strict comparison).
     const embeddingTrue = await ddb.send(
       new ScanCommand({
         TableName: this.tableName,
         Select: 'COUNT',
-        FilterExpression: '#e = :true',
+        FilterExpression: '#e = :one',
         ExpressionAttributeNames: { '#e': 'embedding' },
-        ExpressionAttributeValues: { ':true': true },
+        ExpressionAttributeValues: { ':one': 1 },
       })
     );
 
@@ -149,9 +152,9 @@ export class YouTubeDynamoClient {
       new ScanCommand({
         TableName: this.tableName,
         Select: 'COUNT',
-        FilterExpression: '#e = :false',
+        FilterExpression: '#e = :zero',
         ExpressionAttributeNames: { '#e': 'embedding' },
-        ExpressionAttributeValues: { ':false': false },
+        ExpressionAttributeValues: { ':zero': 0 },
       })
     );
 
