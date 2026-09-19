@@ -20,7 +20,7 @@ YouTube から音声をダウンロードし、S3 にアップロードする Ru
 ```bash
 # 必須設定
 AWS_REGION=ap-northeast-1
-S3_BUCKET_NAME=audio4gladia
+S3_BUCKET_NAME=audio4input
 DYNAMO_TABLE_NAME=YoutubeList
 
 # 直接S3アップロードを有効化
@@ -109,7 +109,7 @@ gem 'dotenv'
 
 ```
 🎬 Direct S3 download: https://www.youtube.com/watch?v=dQw4w9WgXcQ
-📤 Streaming to S3: s3://audio4gladia/dQw4w9WgXcQ.mp4
+📤 Streaming to S3: s3://audio4input/dQw4w9WgXcQ.mp4
 📦 Uploaded part 1 (5242880 bytes)
 📦 Uploaded part 2 (3145728 bytes)
 ✅ Successfully streamed to S3: dQw4w9WgXcQ.mp4

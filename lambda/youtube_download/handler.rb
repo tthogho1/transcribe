@@ -24,7 +24,7 @@ class YouTubeDownloader
       puts "📋 Configuration:"
       puts "  - AWS Region: #{ENV['AWS_REGION'] || 'ap-northeast-1'}"
       puts "  - DynamoDB Table: #{ENV['DYNAMO_TABLE_NAME'] || 'YoutubeList'}"
-      puts "  - S3 Bucket: #{ENV['S3_BUCKET_NAME'] || 'audio4gladia'}"
+      puts "  - S3 Bucket: #{ENV['S3_BUCKET_NAME'] || 'audio4input'}"
       puts "  - Direct S3 Upload: #{ENV['DIRECT_S3_UPLOAD']}"
       
       # DynamoDBクライアント初期化
@@ -34,7 +34,7 @@ class YouTubeDownloader
       
       @table_name = ENV['DYNAMO_TABLE_NAME'] || 'YoutubeList'
       @output_dir = ENV['DOWNLOAD_OUTPUT_DIR'] || './downloads'
-      @s3_bucket = ENV['S3_BUCKET_NAME'] || 'audio4gladia'
+      @s3_bucket = ENV['S3_BUCKET_NAME'] || 'audio4input'
       
       # S3クライアント初期化
       puts "🪣 Initializing S3 client..."
