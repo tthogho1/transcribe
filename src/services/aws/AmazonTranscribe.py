@@ -1,18 +1,36 @@
-import boto3
+"""
+Gladia-driven entrypoint (replaces AWS Transcribe usage).
+
+This script polls the configured queue (SQS) for S3 object-created
+notifications and uses the GladiaTranscriber to process audio files.
+
+It preserves the previous behavior of reading SQS messages and updating
+the DynamoDB `transcribed` flag, but delegates transcription to Gladia.io.
+"""
+
 import logging
 import os
 import json
-from dotenv import load_dotenv
 import sys
+import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from services.database.youtube_dynamodb_client import YoutubeDynamoDBClient
+from services.aws.GladiaTranscribe import GladiaTranscriber
+from dotenv import load_dotenv
 
-# ログ設定
+try:
+    import boto3
+except Exception:
+    boto3 = None
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+if boto3 is None:
+    logger.error("boto3 is required to poll SQS. Install boto3 or run the Gladia worker script instead.")
+    raise SystemExit(1)
 
 sqs = boto3.client(
     "sqs",
@@ -21,86 +39,58 @@ sqs = boto3.client(
     region_name=os.getenv("AWS_REGION"),
 )
 
-transcribe = boto3.client(
-    "transcribe",
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    region_name=os.getenv("AWS_REGION"),
-)
 
-# DynamoDBクライアント初期化
-dynamodb_client = YoutubeDynamoDBClient()
+def main():
+    sqs_url = os.getenv("SQS_QUEUE_URL")
+    if not sqs_url:
+        logger.error("SQS_QUEUE_URL environment variable is not set. Set it or run src/services/aws/gladia_sqs_worker.py")
+        return
 
-# SQSからメッセージ受信し、Transcribeジョブを実行
-logger.info("SQS URL : " + os.getenv("SQS_QUEUE_URL"))
-while True:
-    response = sqs.receive_message(
-        QueueUrl=os.getenv("SQS_QUEUE_URL"), MaxNumberOfMessages=1, WaitTimeSeconds=10
-    )
-    messages = response.get("Messages", [])
-    if not messages:
-        logger.info("No messages in SQS queue. Waiting...")
-        continue
+    transcriber = GladiaTranscriber()
 
-    message = messages[0]
-    logger.info(f"Received message: {message['MessageId']}")
-    body = json.loads(message["Body"])
-    # S3ファイルパス取得
-    s3_bucket = body.get("detail", {}).get("bucket", {}).get("name")
-    s3_key = body.get("detail", {}).get("object", {}).get("key")
-    if not s3_bucket or not s3_key:
-        logger.error(f"S3 path or bucket not found in SQS message: {body}")
-        sqs.delete_message(
-            QueueUrl=os.getenv("SQS_QUEUE_URL"), ReceiptHandle=message["ReceiptHandle"]
-        )
-        continue
+    logger.info(f"Starting Gladia-driven transcription loop. SQS URL: {sqs_url}")
 
-    file_id = os.path.splitext(os.path.basename(s3_key))[0]
-    media_uri = f"s3://{s3_bucket}/{s3_key}"
-    logger.info(f"Start transcription job for: {media_uri}")
-    try:
-        transcribe.start_transcription_job(
-            TranscriptionJobName=file_id,
-            Media={"MediaFileUri": media_uri},
-            MediaFormat="mp4",
-            LanguageCode="ja-JP",
-            OutputBucketName=os.getenv("TRANSCRIBE_OUTPUT_BUCKET", "audio4output"),
-        )
-        logger.info(f"Transcription job started: {file_id}")
+    while True:
+        try:
+            response = sqs.receive_message(QueueUrl=sqs_url, MaxNumberOfMessages=1, WaitTimeSeconds=10)
+            messages = response.get("Messages", [])
+            if not messages:
+                logger.debug("No messages in queue. Waiting...")
+                continue
 
-        # ジョブの完了を監視
-        logger.info(f"Monitoring transcription job: {file_id}")
-        while True:
-            job_status = transcribe.get_transcription_job(TranscriptionJobName=file_id)
-            status = job_status["TranscriptionJob"]["TranscriptionJobStatus"]
+            message = messages[0]
+            logger.info(f"Received message: {message['MessageId']}")
+            body = json.loads(message.get("Body", "{}"))
 
-            if status == "COMPLETED":
-                logger.info(f"Transcription job completed: {file_id}")
-                # DynamoDBのtranscribedフラグを1に更新
-                success = dynamodb_client.update_transcribed_status(file_id, True)
+            s3_bucket = body.get("detail", {}).get("bucket", {}).get("name")
+            s3_key = body.get("detail", {}).get("object", {}).get("key")
+            if not s3_bucket or not s3_key:
+                logger.error(f"S3 path or bucket not found in message: {body}")
+                sqs.delete_message(QueueUrl=sqs_url, ReceiptHandle=message["ReceiptHandle"])
+                continue
+
+            file_id = os.path.splitext(os.path.basename(s3_key))[0]
+            logger.info(f"Processing audio: s3://{s3_bucket}/{s3_key} (id={file_id})")
+
+            try:
+                success = transcriber.process_transcription(s3_bucket, s3_key, file_id)
                 if success:
-                    logger.info(
-                        f"DynamoDB transcribed flag updated to 1 for video: {file_id}"
-                    )
+                    logger.info(f"Successfully processed: {file_id}")
                 else:
-                    logger.error(
-                        f"Failed to update DynamoDB transcribed flag for video: {file_id}"
-                    )
-                break
-            elif status == "FAILED":
-                logger.error(f"Transcription job failed: {file_id}")
-                # 失敗時はフラグを0のまま残す（更新しない）
-                break
-            else:
-                logger.info(f"Transcription job status: {status}. Waiting...")
-                import time
+                    logger.error(f"Failed to process: {file_id}")
+            except Exception as e:
+                logger.error(f"Error processing transcription for {file_id}: {e}")
 
-                time.sleep(30)  # 30秒待機
+            # Delete message regardless to avoid reprocessing; adjust if you want retries
+            sqs.delete_message(QueueUrl=sqs_url, ReceiptHandle=message["ReceiptHandle"])
 
-    except Exception as e:
-        logger.error(f"Failed to start transcription job for {file_id}: {e}")
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user, shutting down")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected error in loop: {e}")
+            time.sleep(5)
 
-    # SQSメッセージを削除
-    sqs.delete_message(
-        QueueUrl=os.getenv("SQS_QUEUE_URL"), ReceiptHandle=message["ReceiptHandle"]
-    )
+
+if __name__ == "__main__":
+    main()
