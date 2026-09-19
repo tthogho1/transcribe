@@ -84,16 +84,18 @@ class ChatInterface {
       html += `<span class="tokens">Tokens: ${tokens}</span>`;
     }
 
-    if (related) {
+    if (related && related.length > 0) {
       console.log('Related videos:', related);
-      const youtubeURL = 'https://www.youtube.com/watch?v=';
       html += `<br><span class="related">Related:</span><br>`;
       related.forEach(item => {
-        // const youtubeId = item.replace(/\.json$/, '');
-        const youtubeId = item.replace(/(_transcription)?\.json$/, '');
-        html += `<a href="${youtubeURL + youtubeId}" class="related-item">${
-          youtubeURL + youtubeId
-        }</a><br>`;
+        // Server sends {video_id, title, url}; fall back to a raw file_name
+        // string for backward compatibility with older server responses.
+        const url =
+          item.url || `https://www.youtube.com/watch?v=${item.replace(/(_transcription)?\.json$/, '')}`;
+        const label = item.title || url;
+        html += `<a href="${url}" class="related-item" target="_blank" rel="noopener">${this.escapeHtml(
+          label
+        )}</a><br>`;
       });
     }
 
@@ -237,7 +239,7 @@ class ChatInterface {
 
   handleChatResponse(data) {
     this.hideTypingIndicator();
-    this.addMessage(data.answer, false, data.timestamp, data.tokens_used, data.file_names);
+    this.addMessage(data.answer, false, data.timestamp, data.tokens_used, data.related_videos);
     this.updateSources(data.sources);
     this.setLoadingState(false);
 

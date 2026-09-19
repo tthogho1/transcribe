@@ -67,13 +67,15 @@ class TextChunker:
         return utterances
 
     def chunk_conversations(
-        self, utterances: List[Dict[str, Any]], file_name: str
+        self, utterances: List[Dict[str, Any]], file_name: str, title: str = ""
     ) -> List[ConversationChunk]:
         """
         Split utterances into chunks using character-based splitting
         Args:
             utterances: List of utterances
             file_name: Name of the file being processed
+            title: Human-readable title (e.g. YouTube video title) stored
+                   alongside each chunk for display purposes
         Returns:
             List of chunks
         """
@@ -95,6 +97,7 @@ class TextChunker:
                         chunk_index=i,
                         original_length=len(content),
                         file_name=file_name,
+                        title=title,
                     )
                 )
                 chunk_id += 1
@@ -115,12 +118,15 @@ class TextProcessor:
         self.tokenizer = JapaneseTokenizer()
         self.chunker = TextChunker(chunk_size, chunk_overlap)
 
-    def process_text(self, text: str, file_name: str) -> List[ConversationChunk]:
+    def process_text(
+        self, text: str, file_name: str, title: str = ""
+    ) -> List[ConversationChunk]:
         """
         Complete text processing pipeline
         Args:
             text: Input text
             file_name: Name of the file being processed
+            title: Human-readable title stored alongside each chunk
         Returns:
             List of conversation chunks
         """
@@ -131,7 +137,7 @@ class TextProcessor:
         print(f"Split into {len(utterances)} utterances")
 
         # 2. Create chunks
-        chunks = self.chunker.chunk_conversations(utterances, file_name)
+        chunks = self.chunker.chunk_conversations(utterances, file_name, title)
         print(f"✂️ Created {len(chunks)} chunks")
 
         return chunks
