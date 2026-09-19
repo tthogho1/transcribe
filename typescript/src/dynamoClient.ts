@@ -138,23 +138,26 @@ export class YouTubeDynamoClient {
     // Stored as a DynamoDB Number (0/1) by the Python ingestion pipeline,
     // not a Boolean - must compare against :one/:zero, not true/false,
     // or the FilterExpression never matches (type-strict comparison).
+    // embedding may be stored as a Number (0/1) or as a Boolean (false/true)
+    // Count true values (numeric 1 OR boolean true)
     const embeddingTrue = await ddb.send(
       new ScanCommand({
         TableName: this.tableName,
         Select: 'COUNT',
-        FilterExpression: '#e = :one',
+        FilterExpression: '(#e = :one) OR (#e = :true)',
         ExpressionAttributeNames: { '#e': 'embedding' },
-        ExpressionAttributeValues: { ':one': 1 },
+        ExpressionAttributeValues: { ':one': 1, ':true': true },
       })
     );
 
+    // Count false values (numeric 0 OR boolean false)
     const embeddingFalse = await ddb.send(
       new ScanCommand({
         TableName: this.tableName,
         Select: 'COUNT',
-        FilterExpression: '#e = :zero',
+        FilterExpression: '(#e = :zero) OR (#e = :false)',
         ExpressionAttributeNames: { '#e': 'embedding' },
-        ExpressionAttributeValues: { ':zero': 0 },
+        ExpressionAttributeValues: { ':zero': 0, ':false': false },
       })
     );
 
