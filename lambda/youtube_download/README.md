@@ -75,7 +75,7 @@ ruby handler.rb
 | `AWS_SECRET_ACCESS_KEY` | AWS シークレットアクセスキー | 必須 |
 | `DYNAMO_TABLE_NAME` | DynamoDB テーブル名 | `YoutubeList` |
 | `DOWNLOAD_OUTPUT_DIR` | ダウンロード先ディレクトリ | `./downloads` |
-| `S3_BUCKET_NAME` | S3バケット名 | `audio4gladia` |
+| `S3_BUCKET_NAME` | S3バケット名 | `audio4input` |
 | `UPLOAD_TO_S3` | S3自動アップロード | `false` |
 
 ## 動作フロー
