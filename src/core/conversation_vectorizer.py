@@ -98,7 +98,14 @@ class ConversationVectorizer:
                    alongside each chunk for display in search results
         Returns:
             List of processed chunks
+        Raises:
+            RuntimeError: If the BM25 client is not available
+            Exception: Whatever the Zilliz insert raises, so callers never see
+                       chunks that were not actually stored
         """
+        if not self.bm25_client:
+            raise RuntimeError("BM25 client not available - cannot insert data")
+
         print("🔄 Starting BM25 monologue processing...")
 
         chunks = self.text_processor.process_text(text, file_name, title)
@@ -107,13 +114,7 @@ class ConversationVectorizer:
             [chunk.text for chunk in chunks]
         )
 
-        if self.bm25_client:
-            try:
-                self.bm25_client.insert_data(chunks, dense_embeddings)
-            except Exception as e:
-                print(f"⚠️ Skipped inserting data into BM25 collection: {e}")
-        else:
-            print("⚠️ BM25 client not available - skipping data insertion")
+        self.bm25_client.insert_data(chunks, dense_embeddings)
 
         print("🎉 BM25 processing completed!")
         return chunks
