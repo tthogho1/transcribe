@@ -314,12 +314,13 @@ class YouTubeDownloader
         youtube_url
       ]
       
-      _stdout, _stderr, status = Open3.capture3(*info_cmd)
+      _stdout, stderr, status = Open3.capture3(*info_cmd)
       unless status.success?
+        puts "❌ Failed to get file info for #{video_id}: #{stderr}"
         return {
           video_id: video_id,
           success: false,
-          message: "Failed to get file info"
+          message: "Failed to get file info: #{stderr.strip}"
         }
       end
       
