@@ -263,6 +263,46 @@ class ChatService:
         """Search relevant conversation chunks via BM25 hybrid search"""
         return self.vectorizer.hybrid_search_bm25(query, limit=limit)
 
+    # Max characters taken from each prior turn when folding history into the
+    # search query. Keeps BM25/dense signal from being drowned out by a long
+    # generated answer; just enough to carry forward the topic's keywords.
+    HISTORY_SNIPPET_CHARS = 150
+
+    def build_search_query(
+        self, query: str, conversation_history: List[Dict] = None
+    ) -> str:
+        """
+        Fold the most recent turn into the search-only query so short
+        follow-ups ("それ", "その動画は？") still carry enough keywords for
+        retrieval. This is a cheap heuristic, not an LLM rewrite: it does not
+        resolve pronouns or handle topic changes ("それじゃなくて..."), but it
+        covers the common case where the needed keyword is simply the
+        previous turn's topic.
+
+        The returned string is for search only; the original `query` is still
+        used for the answer-generation prompt and the response.
+        """
+        if not conversation_history:
+            return query
+
+        last_user = next(
+            (m["content"] for m in reversed(conversation_history) if m.get("role") == "user"),
+            None,
+        )
+        last_assistant = next(
+            (m["content"] for m in reversed(conversation_history) if m.get("role") == "assistant"),
+            None,
+        )
+
+        parts = []
+        if last_user:
+            parts.append(last_user[: self.HISTORY_SNIPPET_CHARS])
+        if last_assistant:
+            parts.append(last_assistant[: self.HISTORY_SNIPPET_CHARS])
+        parts.append(query)
+
+        return " ".join(parts)
+
     def get_related_videos(self, search_results: List[SearchResult]) -> List[Dict[str, str]]:
         """
         Build the "Related" video list directly from each SearchResult's
@@ -313,8 +353,11 @@ class ChatService:
                 query = self.translator.translate(query)
                 logger.info(f"Translated prompt for search: {query}")
 
-            # Search for relevant conversations via native Zilliz BM25 hybrid search
-            search_results = self.search(query, limit=max_results)
+            # Search for relevant conversations via native Zilliz BM25 hybrid search.
+            # Fold in the previous turn so short follow-ups still retrieve well;
+            # `query` itself (used below for the prompt and response) is untouched.
+            search_query = self.build_search_query(query, conversation_history)
+            search_results = self.search(search_query, limit=max_results)
 
             # Generate AI response with conversation history
             ai_response = self.ai_generator.generate_response(
