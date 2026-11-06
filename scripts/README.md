@@ -37,7 +37,37 @@ python scripts/generate_embeddings_with_vectorizer.py --log-level DEBUG
 - `S3_TRANSCRIPT_BUCKET` または `S3_BUCKET_NAME`
 - `ZILLIZ_URI`, `ZILLIZ_TOKEN`
 
+**注意**: 対象は `embedding` フラグだけで選ばれ、`transcribed` は見ていません。未転写の動画も対象になり、転写 JSON がないため失敗して `embedding = 0` のまま残り、バッチ枠を消費します。成功件数が 0 の場合は、先に転写を実行するか `--batch-size` を増やしてください。
+
+### `gladia_transcribe/transcribe_untranscribed.py`
+
+**目的**: DynamoDB で `transcribed = 0` の動画を Gladia で文字起こしします（通常はこちらを使用）。
+
+- `audio4input` バケットから `{video_id}.m4a`、なければ `{video_id}.mp4` を探す
+- 結果を `TRANSCRIBE_OUTPUT_BUCKET`（デフォルト `audio4gladia`）に `{video_id}_transcription.json` として保存し、`transcribed = 1` に更新
+- 音声ファイルが S3 にない動画はスキップ（`transcribed = 0` のまま）
+- オプションなし（最大 1000 件を処理。1 件ごとに Gladia の課金が発生）
+
+```bash
+python scripts/gladia_transcribe/transcribe_untranscribed.py
+```
+
+### `gladia_transcribe/transcribe_audio4input.py`
+
+**目的**: S3 バケット内の `.mp4` をすべて Gladia で文字起こしします。DynamoDB は見ないため、転写済みのファイルも再度処理されます。`.m4a` は対象外です。
+
+```bash
+python scripts/gladia_transcribe/transcribe_audio4input.py --limit 1
+python scripts/gladia_transcribe/transcribe_audio4input.py --prefix some/prefix/ --limit 5
+```
+
+### `embed_missing_embeddings.py`
+
+`generate_embeddings_with_vectorizer.py` の旧版です。動画タイトルを保存しないため、通常は `generate_embeddings_with_vectorizer.py` を使用してください。
+
 ### `add_embedding_attribute.py`
+
+**注意**: 既存データ移行用の一回限りのスクリプトです。再実行すると、転写済みでまだエンベディングされていない動画も `embedding = true` になり、エンベディングが生成されなくなります。
 
 **目的**: DynamoDB テーブル内の全項目に新規属性`embedding`を追加
 
