@@ -187,6 +187,23 @@ class EmbeddingPipeline:
 
         text_fragments: List[str] = []
 
+        # Gladia format as saved by GladiaTranscriber.save_result_to_s3:
+        # {"result": {"transcription": {"full_transcript": str, "utterances": [...]}}}
+        # full_transcript already contains every utterance, so use it alone.
+        # Without this branch the JSON fell through to _collect_strings, which
+        # concatenated full_transcript with the first 19 utterances and
+        # duplicated the opening of every video in the index.
+        result_field = transcription.get("result")
+        if isinstance(result_field, dict):
+            gladia = result_field.get("transcription")
+            if isinstance(gladia, dict):
+                full = gladia.get("full_transcript")
+                if isinstance(full, str) and full.strip():
+                    return full.strip()
+                utterance_text = EmbeddingPipeline._join_segments(gladia.get("utterances"))
+                if utterance_text:
+                    return utterance_text
+
         # AWS Transcribe format
         results = transcription.get("results")
         if isinstance(results, dict):
