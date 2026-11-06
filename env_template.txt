@@ -13,6 +13,7 @@ OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-3.5-turbo
 OPENAI_MAX_TOKENS=1000
 OPENAI_TEMPERATURE=0.7
+OPENAI_REWRITE_MODEL=gpt-4.1-mini  # follow-up check / query rewrite before each search
 
 # AWS Configuration (if using S3 data extraction)
 AWS_ACCESS_KEY_ID=your-aws-access-key
