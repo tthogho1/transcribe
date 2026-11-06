@@ -257,51 +257,85 @@ class ChatService:
         self.vectorizer = ConversationVectorizer(zilliz_uri, zilliz_token)
 
         self.ai_generator = OpenAIGenerator()
+        # Small, fast model for the follow-up check / query rewrite that runs
+        # before every search; the answer itself still uses OPENAI_MODEL.
+        self.rewrite_model = os.getenv("OPENAI_REWRITE_MODEL", "gpt-4.1-mini")
         self.translator = GoogleTranslator(source="auto", target="ja")
 
     def search(self, query: str, limit: int = 5) -> List[SearchResult]:
         """Search relevant conversation chunks via BM25 hybrid search"""
         return self.vectorizer.hybrid_search_bm25(query, limit=limit)
 
-    # Max characters taken from each prior turn when folding history into the
-    # search query. Keeps BM25/dense signal from being drowned out by a long
-    # generated answer; just enough to carry forward the topic's keywords.
-    HISTORY_SNIPPET_CHARS = 150
+    # How much recent history the follow-up classifier sees. Only the latest
+    # turns matter for deciding "is this a continuation?", and capping each
+    # message keeps the extra LLM call small and fast.
+    REWRITE_HISTORY_MESSAGES = 4  # = last 2 user/assistant turns
+    REWRITE_MESSAGE_CHARS = 500
 
-    def build_search_query(
+    REWRITE_SYSTEM_PROMPT = """You decide whether a user's new question continues the previous conversation, and rewrite it as a standalone search query.
+
+Return JSON only, in this exact shape:
+{"is_follow_up": true or false, "standalone_query": "..."}
+
+Rules:
+- is_follow_up = true only if the new question cannot be fully understood without the conversation (pronouns like "それ", "その動画", "さっきの", "もっと詳しく", or an obvious continuation of the same topic).
+- is_follow_up = false if the question is understandable on its own or changes the topic, even if it is in the same broad area.
+- If is_follow_up is true, standalone_query must be one self-contained question with pronouns and omitted subjects replaced by the concrete topic from the conversation.
+- If is_follow_up is false, standalone_query must be the new question unchanged.
+- Write standalone_query in Japanese (the search index is Japanese). Do not answer the question."""
+
+    def analyze_query(
         self, query: str, conversation_history: List[Dict] = None
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
-        Fold the most recent turn into the search-only query so short
-        follow-ups ("それ", "その動画は？") still carry enough keywords for
-        retrieval. This is a cheap heuristic, not an LLM rewrite: it does not
-        resolve pronouns or handle topic changes ("それじゃなくて..."), but it
-        covers the common case where the needed keyword is simply the
-        previous turn's topic.
+        Ask a small LLM whether `query` continues the conversation and, if
+        so, rewrite it into a self-contained search query.
 
-        The returned string is for search only; the original `query` is still
-        used for the answer-generation prompt and the response.
+        Returns {"is_follow_up": bool, "search_query": str}. With no history
+        there is nothing to continue, so the LLM is not called. If the LLM
+        call fails or returns malformed JSON, the original query is used for
+        search and history is still passed to answer generation (the previous
+        default), so a classifier outage never breaks chat.
         """
-        if not conversation_history:
-            return query
+        conversation = [
+            m for m in (conversation_history or []) if m.get("role") in ("user", "assistant")
+        ]
+        if not conversation:
+            return {"is_follow_up": False, "search_query": query}
 
-        last_user = next(
-            (m["content"] for m in reversed(conversation_history) if m.get("role") == "user"),
-            None,
+        recent = conversation[-self.REWRITE_HISTORY_MESSAGES:]
+        history_text = "\n".join(
+            f"{m['role']}: {m['content'][: self.REWRITE_MESSAGE_CHARS]}" for m in recent
         )
-        last_assistant = next(
-            (m["content"] for m in reversed(conversation_history) if m.get("role") == "assistant"),
-            None,
+        user_content = f"Conversation:\n{history_text}\n\nNew question: {query}"
+
+        try:
+            response = self.ai_generator.client.chat.completions.create(
+                model=self.rewrite_model,
+                messages=[
+                    {"role": "system", "content": self.REWRITE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=200,
+            )
+            result = json.loads(response.choices[0].message.content)
+            is_follow_up = result.get("is_follow_up")
+            standalone = result.get("standalone_query")
+            if not isinstance(is_follow_up, bool):
+                raise ValueError(f"is_follow_up is not a bool: {is_follow_up!r}")
+            if not isinstance(standalone, str) or not standalone.strip():
+                standalone = query
+        except Exception as e:
+            logger.warning(f"Follow-up analysis failed, using original query: {e}")
+            return {"is_follow_up": True, "search_query": query}
+
+        search_query = standalone.strip() if is_follow_up else query
+        logger.info(
+            f"Follow-up analysis: is_follow_up={is_follow_up}, search_query={search_query!r}"
         )
-
-        parts = []
-        if last_user:
-            parts.append(last_user[: self.HISTORY_SNIPPET_CHARS])
-        if last_assistant:
-            parts.append(last_assistant[: self.HISTORY_SNIPPET_CHARS])
-        parts.append(query)
-
-        return " ".join(parts)
+        return {"is_follow_up": is_follow_up, "search_query": search_query}
 
     def get_related_videos(self, search_results: List[SearchResult]) -> List[Dict[str, str]]:
         """
@@ -353,17 +387,20 @@ class ChatService:
                 query = self.translator.translate(query)
                 logger.info(f"Translated prompt for search: {query}")
 
-            # Search for relevant conversations via native Zilliz BM25 hybrid search.
-            # Fold in the previous turn so short follow-ups still retrieve well;
-            # `query` itself (used below for the prompt and response) is untouched.
-            search_query = self.build_search_query(query, conversation_history)
-            search_results = self.search(search_query, limit=max_results)
+            # Decide whether this question continues the conversation. Follow-ups
+            # are searched with an LLM-rewritten standalone query; a new topic is
+            # searched as-is and answered without the previous history, so an
+            # old topic can't leak into retrieval or the answer.
+            analysis = self.analyze_query(query, conversation_history)
+            search_results = self.search(analysis["search_query"], limit=max_results)
+            history_for_answer = (
+                (conversation_history or []) if analysis["is_follow_up"] else []
+            )
 
-            # Generate AI response with conversation history
             ai_response = self.ai_generator.generate_response(
                 query=query,
                 search_results=search_results,
-                conversation_history=conversation_history or [],
+                conversation_history=history_for_answer,
                 is_english_input=is_english_input
             )
 
