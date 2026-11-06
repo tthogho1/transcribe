@@ -6,8 +6,10 @@ Function attached to the `text` field, and hybrid search is performed with
 pymilvus's built-in AnnSearchRequest + RRFRanker.
 """
 
+import json
+
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from pymilvus import (
     connections,
     Collection,
@@ -237,7 +239,7 @@ class ZillizBM25Client:
                 print("❌ Hybrid search error: collection is not initialized")
                 return []
 
-            out_fields = ["text", "speaker", "timestamp", "file_name", "title"]
+            out_fields = ["text", "speaker", "timestamp", "file_name", "title", "chunk_index"]
 
             dense_req = AnnSearchRequest(
                 data=dense_query,
@@ -277,7 +279,7 @@ class ZillizBM25Client:
                 anns_field="sparse_vector",
                 param={"metric_type": "BM25", "params": {}},
                 limit=limit,
-                output_fields=["text", "speaker", "timestamp", "file_name", "title"],
+                output_fields=["text", "speaker", "timestamp", "file_name", "title", "chunk_index"],
             )
             return self._to_search_results(results, "bm25")
 
@@ -300,9 +302,32 @@ class ZillizBM25Client:
                     similarity=float(hit.score),
                     search_type=search_type,
                     title=hit.entity.get("title", ""),
+                    chunk_index=int(hit.entity.get("chunk_index", -1)),
                 )
             )
         return search_results
+
+    def fetch_chunk_ranges(self, ranges: List[Tuple[str, int, int]]) -> Dict[str, Dict[int, str]]:
+        """
+        Fetch chunk texts for several (file_name, first_index, last_index)
+        ranges in one query. Returns {file_name: {chunk_index: text}}.
+        """
+        if self.collection is None or not ranges:
+            return {}
+        clauses = [
+            f'(file_name == {json.dumps(f, ensure_ascii=False)} '
+            f"and chunk_index >= {int(lo)} and chunk_index <= {int(hi)})"
+            for f, lo, hi in ranges
+        ]
+        rows = self.collection.query(
+            expr=" or ".join(clauses),
+            output_fields=["file_name", "chunk_index", "text"],
+            limit=sum(hi - lo + 1 for _, lo, hi in ranges),
+        )
+        out: Dict[str, Dict[int, str]] = {}
+        for row in rows:
+            out.setdefault(row["file_name"], {})[int(row["chunk_index"])] = row["text"]
+        return out
 
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get collection statistics"""

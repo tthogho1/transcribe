@@ -1,15 +1,19 @@
 """Score the chat server's retrieval against scripts/eval/retrieval_eval.json.
 
 For each question, runs the same search the chat server uses for a first turn
-(ConversationVectorizer.hybrid_search_bm25: ruri-v3 dense + Zilliz BM25, RRF)
-and checks whether a chunk from any of the question's relevant videos is
-returned.
+(ConversationVectorizer.search_passages: ruri-v3 dense + Zilliz BM25 fused with
+RRF, best chunk per video, optional reranker) and checks whether any of the
+question's relevant videos is returned. --mode hybrid scores the raw
+chunk-level hybrid search instead (several chunks of one video can fill the
+top k there).
 
 Metrics (per category and overall; no_answer questions are skipped):
-  Hit@k  share of questions with a relevant chunk in the top k chunks.
-         Hit@5 is what the chat answer sees (it uses the top 5 chunks).
-  MRR    mean of 1 / rank of the first relevant chunk within the top
-         --depth chunks (0 when none is found).
+  Hit@k  share of questions with a relevant video in the top k results.
+         Hit@5 is what the chat answer sees (it uses the top 5 results).
+  MRR    mean of 1 / rank of the first relevant result within the top
+         --depth results (0 when none is found).
+With a reranker, use --depth 10 to match the chat server, which reranks
+max(5, RERANK_CANDIDATES) = 10 candidates.
 
 Usage (from the project root):
   python scripts/eval/run_retrieval_eval.py
@@ -54,8 +58,10 @@ def video_id(file_name: str) -> str:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate retrieval with retrieval_eval.json")
     p.add_argument("--eval-file", default=DEFAULT_EVAL_FILE)
-    p.add_argument("--mode", choices=["hybrid", "bm25"], default="hybrid",
-                   help="hybrid = what the chat server uses (default); bm25 = BM25 only")
+    p.add_argument("--mode", choices=["passages", "hybrid", "bm25"], default="passages",
+                   help="passages = what the chat server uses (default: best chunk per video "
+                        "+ neighbouring chunks); hybrid = raw chunk-level hybrid search; "
+                        "bm25 = BM25 only")
     p.add_argument("--depth", type=int, default=20,
                    help="Chunks retrieved per question; MRR and Hit@k look within this depth")
     p.add_argument("--reranker", default=None,
@@ -98,7 +104,9 @@ def main() -> None:
     rows = []
     for q in questions:
         started = time.perf_counter()
-        if args.mode == "hybrid":
+        if args.mode == "passages":
+            results = vectorizer.search_passages(q["question"], limit=args.depth)
+        elif args.mode == "hybrid":
             results = vectorizer.hybrid_search_bm25(q["question"], limit=args.depth)
         else:
             results = vectorizer.bm25_client.bm25_search(q["question"], limit=args.depth)

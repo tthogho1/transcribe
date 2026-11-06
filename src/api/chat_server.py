@@ -290,8 +290,12 @@ class ChatService:
         self.translator = GoogleTranslator(source="auto", target="ja")
 
     def search(self, query: str, limit: int = 5) -> List[SearchResult]:
-        """Search relevant conversation chunks via BM25 hybrid search"""
-        return self.vectorizer.hybrid_search_bm25(query, limit=limit)
+        """
+        Search relevant passages: BM25 hybrid search, best chunk per video,
+        optional reranking, then each hit widened with its neighbouring chunks
+        so a story's set-up and punchline reach the answer together.
+        """
+        return self.vectorizer.search_passages(query, limit=limit)
 
     # How much recent history the follow-up classifier sees. Only the latest
     # turns matter for deciding "is this a continuation?", and capping each
