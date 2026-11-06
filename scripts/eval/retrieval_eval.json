@@ -1,0 +1,283 @@
+{
+  "description": "Retrieval evaluation set. A question is a hit when any of relevant_video_ids appears in the top-k results. relevant_video_ids were collected by searching every transcript chunk in Zilliz with relevance_pattern.",
+  "questions": [
+    {
+      "id": "q01",
+      "category": "keyword",
+      "question": "ホチキスの留め方で怒られた話を教えて",
+      "relevant_video_ids": [
+        "0Pay8W9pdVk",
+        "6gdY_g86E8I",
+        "gu64ftN7oVI",
+        "i6sAKX0A1i0",
+        "ixsFv1UHU24"
+      ],
+      "expected_answer": "斜めに留めたら資料を目の前で破り捨てられ、縦横の留め方を指導されて100枚近くゼロからやり直した",
+      "note": "",
+      "relevance_pattern": "ホチキス.{0,60}(斜め|破|止め方|留め方)"
+    },
+    {
+      "id": "q02",
+      "category": "keyword",
+      "question": "黄昏研修とは何ですか？",
+      "relevant_video_ids": [
+        "6RzlfOB2XG4",
+        "H1Gu-keb9AY",
+        "W1gu5qJIz3g",
+        "aEQSKZkuGdk",
+        "bXAD-tuL0VM",
+        "pHcvTwyHpec",
+        "pvEHKx-DrDw",
+        "qOBphwbnQL8",
+        "weAKti353nY"
+      ],
+      "expected_answer": "45歳前後で受ける、銀行を出たあとのキャリアや資産形成を考えさせる研修",
+      "note": "",
+      "relevance_pattern": "黄昏研修"
+    },
+    {
+      "id": "q03",
+      "category": "keyword",
+      "question": "研修初日に髪を切られた話を教えて",
+      "relevant_video_ids": [
+        "9uz8L0RfmSM",
+        "_yBIaOyF1x0"
+      ],
+      "expected_answer": "研修初日にみんな髪を切りに行かされ、爆速でバリカンで切られた",
+      "note": "",
+      "relevance_pattern": "バリカン"
+    },
+    {
+      "id": "q04",
+      "category": "keyword",
+      "question": "上司に『死んでも頑張ります』と言ったらどう返された？",
+      "relevant_video_ids": [
+        "EzwOEdtFWX4",
+        "UbkxL6ndlNw"
+      ],
+      "expected_answer": "スルガ銀行の事例で、『それなら死んでみろ』と叱責された",
+      "note": "",
+      "relevance_pattern": "死んでみろ"
+    },
+    {
+      "id": "q05",
+      "category": "keyword",
+      "question": "灰皿を投げる上司の話を教えて",
+      "relevant_video_ids": [
+        "-hiAeXfgYKI",
+        "7qeQjYCOkWI",
+        "QE8bui4Iy0U"
+      ],
+      "expected_answer": "部長がガラスの灰皿を投げてくる。住友はガラス、旧さくらは鉄の灰皿というコメントも",
+      "note": "",
+      "relevance_pattern": "灰皿.{0,40}投げ|投げ.{0,40}灰皿"
+    },
+    {
+      "id": "q06",
+      "category": "keyword",
+      "question": "営業で追い込まれた時に何にハマっていた？",
+      "relevant_video_ids": [
+        "Ao6t-inlNew",
+        "W_gq0A1kFS4"
+      ],
+      "expected_answer": "何も考えずに済むアニメ（コードギアス、桜蘭高校ホスト部、クラナドなど）を見続けていた",
+      "note": "",
+      "relevance_pattern": "コードギアス"
+    },
+    {
+      "id": "q07",
+      "category": "paraphrase",
+      "question": "上司に怒られている時、心が折れないようにどう考えていた？",
+      "relevant_video_ids": [
+        "JkrnInpqT-g",
+        "RY8NP-vAb1A"
+      ],
+      "expected_answer": "怒られている時間も給料が出ていると考え、頭の中で『チャリーン』と言い続ける",
+      "note": "質問に答えのキーワードを含まない",
+      "relevance_pattern": "チャリーン"
+    },
+    {
+      "id": "q08",
+      "category": "paraphrase",
+      "question": "社長との雑談で話題に困ったら、何を聞けばいい？",
+      "relevant_video_ids": [
+        "8MFcxeRGXrk",
+        "OAf1XG75-Ro"
+      ],
+      "expected_answer": "日経の『私の履歴書』のように、会社を起こした経緯や苦労話を時系列で聞く",
+      "note": "",
+      "relevance_pattern": "私の履歴書.{0,120}(時系列|社長)|(時系列|社長).{0,120}私の履歴書"
+    },
+    {
+      "id": "q09",
+      "category": "paraphrase",
+      "question": "会話を盛り上げるために大事なことは？",
+      "relevant_video_ids": [
+        "A-WS_4IQEGQ",
+        "gdZQt4o1IRY"
+      ],
+      "expected_answer": "共通点を探す、語彙力を広げる、自分が盛り上げるより相手の話に興味津々で聞く",
+      "note": "",
+      "relevance_pattern": "共通点をまず"
+    },
+    {
+      "id": "q10",
+      "category": "paraphrase",
+      "question": "仕事はスピードと質のどちらを重視すべき？",
+      "relevant_video_ids": [
+        "3mSgUZU9Yws"
+      ],
+      "expected_answer": "速さ重視。2点の出来でもまず上司に出して、赤ペンをもらって90点にする方が効率がいい",
+      "note": "",
+      "relevance_pattern": "速さ速さ"
+    },
+    {
+      "id": "q11",
+      "category": "paraphrase",
+      "question": "人生で楽しめる夏はあと何回あると言われた？",
+      "relevant_video_ids": [
+        "3HC3rNwvWzY",
+        "FqISaMlNijM"
+      ],
+      "expected_answer": "30歳の時点で、遊べるのは50歳くらいまでだから楽しい夏はあと20回しか来ないと言われた",
+      "note": "",
+      "relevance_pattern": "楽しい夏"
+    },
+    {
+      "id": "q12",
+      "category": "paraphrase",
+      "question": "街コンに行ったらどうなった？",
+      "relevant_video_ids": [
+        "UKaw3Qvdr-E"
+      ],
+      "expected_answer": "30過ぎの女性5人ほどに囲まれ、三井住友銀行で働いていると言うと年収を聞かれる『地獄の審査』が始まった",
+      "note": "",
+      "relevance_pattern": "リコピン|街コン"
+    },
+    {
+      "id": "q13",
+      "category": "paraphrase",
+      "question": "閉店後の支店の計算は、普通何時ごろに終わる？",
+      "relevant_video_ids": [
+        "3k7rabDBrkQ"
+      ],
+      "expected_answer": "15時に閉まって、15時10分前後に計算が終わるのが普通。遅いと支店の評価に響く",
+      "note": "",
+      "relevance_pattern": "15時10分"
+    },
+    {
+      "id": "q14",
+      "category": "paraphrase",
+      "question": "三井住友銀行を辞めようと思ったきっかけは？",
+      "relevant_video_ids": [
+        "i7K3AvwBp6o"
+      ],
+      "expected_answer": "仕事中に水を飲むなと言うような部長を見て、ここを目指したくないと思った",
+      "note": "関連は辞めた日の話の動画だけに限定",
+      "relevance_pattern": "仕事中に水飲むなっていうような人なんだよねマジでこいつ"
+    },
+    {
+      "id": "q15",
+      "category": "paraphrase",
+      "question": "アフタヌーンティーが好きな女性についてどう思う？",
+      "relevant_video_ids": [
+        "CKftpmuc-o4",
+        "n-OQfniYI_c"
+      ],
+      "expected_answer": "マッチングアプリで避けたい女性の例として、自分大好き系の女性版として挙げている",
+      "note": "",
+      "relevance_pattern": "アフタヌーンティーです|アフタヌーンって言いに"
+    },
+    {
+      "id": "q16",
+      "category": "asr",
+      "question": "銀行に入行したときの初任給はいくらでしたか？",
+      "relevant_video_ids": [
+        "HmGvyQwBhIs",
+        "bdBqiaxVK4c",
+        "n2HJpR8w60A",
+        "pvEHKx-DrDw",
+        "t68tcg-TACQ"
+      ],
+      "expected_answer": "20万5000円（2010年当時）",
+      "note": "文字起こしでは『入行』が『入港』になっている",
+      "relevance_pattern": "20万5000"
+    },
+    {
+      "id": "q17",
+      "category": "asr",
+      "question": "みずほ銀行の初任給はいくらだった？",
+      "relevant_video_ids": [
+        "n2HJpR8w60A"
+      ],
+      "expected_answer": "17万5000円（SMBCは20万5000円）",
+      "note": "文字起こしでは『みずほ』が『水穂』になっている",
+      "relevance_pattern": "水穂銀行17万|みずほ.{0,10}17万"
+    },
+    {
+      "id": "q18",
+      "category": "asr",
+      "question": "「ほまれでございます」はどんな時に使っていた？",
+      "relevant_video_ids": [
+        "DTI9SDQZdd8",
+        "QE8bui4Iy0U",
+        "_JxN_e1SAGw",
+        "hs_v4xT9T2Q",
+        "n7wQ1mf1Euk",
+        "p2nNvv5RY8c",
+        "rzclw_kVUbA"
+      ],
+      "expected_answer": "先輩に殴られたり定規で叩かれた瞬間、出し物のあとに褒められて飲む時、人を楽しませるチャンスをもらった時など",
+      "note": "文字起こしでは『誉れ』『ほばれ』『おまれ』の揺れがある",
+      "relevance_pattern": "(ほまれ|誉れ|ほばれ|おまれ)(でございます|ですよ|だね|だと)"
+    },
+    {
+      "id": "q19",
+      "category": "asr",
+      "question": "駅そばはどれくらい食べていますか？",
+      "relevant_video_ids": [
+        "D1fDEA9N7lM",
+        "lt-ikT9zo_s"
+      ],
+      "expected_answer": "食にこだわりがなく、1日2食で週14食のうち5食くらいはそば",
+      "note": "片方の動画では『駅そば』が『液そば』になっている",
+      "relevance_pattern": "液そば|駅そば"
+    },
+    {
+      "id": "q20",
+      "category": "asr",
+      "question": "ミサワホームに就職した人の話を教えて",
+      "relevant_video_ids": [
+        "FqISaMlNijM",
+        "a7N4b2gfZ-A",
+        "kCGPOSzXVi8"
+      ],
+      "expected_answer": "不動産Gメン滝島さんが最初に就職した会社。説明会の社長のブラックジョークが面白くて入った",
+      "note": "文字起こしでは『ミサワホーム』が『ミサホーム』『ミザホーム』になっている",
+      "relevance_pattern": "ミサホーム|ミザホーム|ミサワホーム"
+    },
+    {
+      "id": "q21",
+      "category": "asr",
+      "question": "涼宮ハルヒの憂鬱の話をしていましたか？",
+      "relevant_video_ids": [
+        "6RzlfOB2XG4",
+        "H1Gu-keb9AY",
+        "W1gu5qJIz3g",
+        "j5G4NzxzxMo"
+      ],
+      "expected_answer": "半沢直樹の後半が同じ話の繰り返しになるのを、エンドレスエイトにたとえていた。学生時代に見ていたアニメとしても挙げている",
+      "note": "正しい表記『涼宮ハルヒ』はどの文字起こしにもなく、すべて『鈴宮春日』",
+      "relevance_pattern": "鈴宮春日|涼宮"
+    },
+    {
+      "id": "q22",
+      "category": "no_answer",
+      "question": "宇宙旅行に行ったことはありますか？",
+      "relevant_video_ids": [],
+      "expected_answer": "文脈に答えがないので『話していない』と答えるべき",
+      "note": "検索の指標の対象外。回答の根拠チェック用",
+      "relevance_pattern": null
+    }
+  ]
+}
