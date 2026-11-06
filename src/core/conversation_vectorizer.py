@@ -5,7 +5,8 @@ Main conversation vectorizer orchestrating all components
 import os
 import sys
 import numpy as np
-from typing import List, Dict
+from dataclasses import replace
+from typing import List, Dict, Optional
 
 # Add src directory to Python path when running as standalone script
 if __name__ == "__main__":
@@ -17,6 +18,7 @@ if __name__ == "__main__":
 from models.conversation_chunk import ConversationChunk, SearchResult
 from services.processing.text_processor import TextProcessor
 from services.processing.vector_generator import HybridVectorGenerator
+from services.processing.reranker import Reranker
 from services.database.zilliz_bm25_client import ZillizBM25Client
 from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
@@ -24,6 +26,24 @@ from dotenv import load_dotenv, find_dotenv
 
 # Load .env from project root (robust in various run contexts)
 load_dotenv(find_dotenv(usecwd=True))
+
+
+def _join_overlapping(texts: List[str], max_overlap: int = 120) -> str:
+    """
+    Join consecutive chunks, dropping the text each chunk repeats from the end
+    of the previous one (chunks are cut with a character overlap).
+    """
+    if not texts:
+        return ""
+    joined = texts[0]
+    for text in texts[1:]:
+        overlap = 0
+        for k in range(min(max_overlap, len(text), len(joined)), 9, -1):
+            if joined.endswith(text[:k]):
+                overlap = k
+                break
+        joined += text[overlap:]
+    return joined
 
 
 class ConversationVectorizer:
@@ -39,6 +59,8 @@ class ConversationVectorizer:
         bm25_collection_name: str = "conversation_chunks_bm25",
         dense_query_prefix: str = "検索クエリ: ",
         dense_document_prefix: str = "検索文書: ",
+        reranker_model: Optional[str] = None,
+        rerank_candidates: Optional[int] = None,
     ):
         """
         Initialize conversation vectorizer
@@ -53,6 +75,12 @@ class ConversationVectorizer:
             dense_query_prefix / dense_document_prefix: ruri-v3 uses asymmetric
                               retrieval prefixes ("1+3 prefix scheme"); pass "" for
                               models that don't use them.
+            reranker_model: CrossEncoder used to re-score hybrid search
+                              candidates. None reads RERANKER_MODEL from the
+                              environment; "" (or an unset variable) disables
+                              reranking.
+            rerank_candidates: How many hybrid results the reranker re-scores.
+                              None reads RERANK_CANDIDATES (default 10).
         """
         # Initialize components
         print("🔧 Initializing TextProcessor...")
@@ -81,6 +109,20 @@ class ConversationVectorizer:
         else:
             print("⚠️ ZILLIZ_URI not provided - skipping ZillizBM25Client initialization")
             self.bm25_client = None
+
+        if reranker_model is None:
+            reranker_model = os.getenv("RERANKER_MODEL", "")
+        if rerank_candidates is None:
+            rerank_candidates = int(os.getenv("RERANK_CANDIDATES", "10"))
+        self.rerank_candidates = rerank_candidates
+        # Neighbouring chunks added around each hit by search_passages().
+        self.context_before = int(os.getenv("CONTEXT_CHUNKS_BEFORE", "1"))
+        self.context_after = int(os.getenv("CONTEXT_CHUNKS_AFTER", "3"))
+        self.reranker = None
+        if reranker_model:
+            print(f"🔧 Initializing Reranker ({reranker_model})...")
+            self.reranker = Reranker(reranker_model)
+            print("✅ Reranker initialized")
 
         print("✅ ConversationVectorizer initialized with all components")
 
@@ -125,6 +167,9 @@ class ConversationVectorizer:
         """
         Perform hybrid search using the native-BM25 collection: dense ANN
         combined server-side with BM25 full-text search on the raw query text.
+        When a reranker is configured, the top `rerank_candidates` fused
+        results (at least `limit`) are re-scored by the cross-encoder and the
+        best `limit` are returned.
         Args:
             query: Search query
             limit: Number of final results
@@ -141,11 +186,96 @@ class ConversationVectorizer:
                 self.vector_generator.dense_generator.generate_query_embedding(query)
             )
 
-            return self.bm25_client.hybrid_search(dense_query, query, limit, rerank_k)
+            if not self.reranker:
+                return self.bm25_client.hybrid_search(dense_query, query, limit, rerank_k)
+
+            candidates = self.bm25_client.hybrid_search(
+                dense_query, query, max(limit, self.rerank_candidates), rerank_k
+            )
+            return self.reranker.rerank(query, candidates, limit)
 
         except Exception as e:
             print(f"❌ BM25 hybrid search error: {e}")
             return []
+
+    def search_passages(
+        self, query: str, limit: int = 5, rerank_k: int = 100
+    ) -> List[SearchResult]:
+        """
+        Search for answer passages rather than single chunks.
+
+        A 300-character chunk often holds only the set-up of a story while the
+        punchline sits in the next chunks, and a story told in both a clip and
+        a full-length video (or repeated inside one transcript) can fill the
+        top results with near-identical set-ups. So:
+          1. hybrid search a wider pool of chunks,
+          2. keep only the best chunk per video,
+          3. rerank those (if a reranker is configured) and take `limit`,
+          4. replace each chunk's text with the passage from
+             `context_before` chunks before it to `context_after` chunks after.
+        If fetching the neighbouring chunks fails, the single chunks are
+        returned unchanged.
+        """
+        try:
+            if not self.bm25_client:
+                print("⚠️ BM25 client not available - passage search unavailable")
+                return []
+
+            dense_query = (
+                self.vector_generator.dense_generator.generate_query_embedding(query)
+            )
+            pool = max(limit * 4, self.rerank_candidates, 20)
+            hits = self.bm25_client.hybrid_search(dense_query, query, pool, rerank_k)
+
+            best_per_video: List[SearchResult] = []
+            seen = set()
+            for hit in hits:
+                if hit.file_name not in seen:
+                    seen.add(hit.file_name)
+                    best_per_video.append(hit)
+
+            if self.reranker:
+                top = self.reranker.rerank(
+                    query, best_per_video[: max(limit, self.rerank_candidates)], limit
+                )
+            else:
+                top = best_per_video[:limit]
+
+            return self._expand_to_passages(top)
+
+        except Exception as e:
+            print(f"❌ Passage search error: {e}")
+            return []
+
+    def _expand_to_passages(self, results: List[SearchResult]) -> List[SearchResult]:
+        if self.context_before == 0 and self.context_after == 0:
+            return results
+        ranges = [
+            (r.file_name, max(0, r.chunk_index - self.context_before),
+             r.chunk_index + self.context_after)
+            for r in results
+            if r.chunk_index >= 0
+        ]
+        try:
+            texts_by_file = self.bm25_client.fetch_chunk_ranges(ranges)
+        except Exception as e:
+            print(f"⚠️ Could not fetch neighbouring chunks, using single chunks: {e}")
+            return results
+
+        passages = []
+        for r in results:
+            chunks = texts_by_file.get(r.file_name, {})
+            if r.chunk_index < 0 or r.chunk_index not in chunks:
+                passages.append(r)
+                continue
+            lo = r.chunk_index - self.context_before
+            hi = r.chunk_index + self.context_after
+            ordered = [chunks[i] for i in sorted(chunks) if lo <= i <= hi]
+            passages.append(
+                replace(r, text=_join_overlapping(ordered),
+                        search_type=f"{r.search_type}+context")
+            )
+        return passages
 
     def get_stats(self) -> Dict:
         """

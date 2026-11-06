@@ -32,6 +32,7 @@ class SearchResult:
     similarity: float
     search_type: str
     title: str = ""
+    chunk_index: int = -1  # position of the chunk within its file; -1 if unknown
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -44,6 +45,7 @@ class SearchResult:
             "similarity": self.similarity,
             "search_type": self.search_type,
             "title": self.title,
+            "chunk_index": self.chunk_index,
         }
 
 

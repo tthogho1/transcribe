@@ -15,6 +15,14 @@ OPENAI_MAX_TOKENS=1000
 OPENAI_TEMPERATURE=0.7
 OPENAI_REWRITE_MODEL=gpt-4.1-mini  # follow-up check / query rewrite before each search
 
+# Optional: rerank hybrid search results with a cross-encoder (empty = off)
+RERANKER_MODEL=           # e.g. cl-nagoya/ruri-v3-reranker-310m
+RERANK_CANDIDATES=10      # hybrid results re-scored per question
+
+# Passage search: neighbouring chunks added around each hit (chunk = ~300 chars)
+CONTEXT_CHUNKS_BEFORE=1
+CONTEXT_CHUNKS_AFTER=3
+
 # AWS Configuration (if using S3 data extraction)
 AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
