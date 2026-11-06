@@ -5,7 +5,7 @@ Main conversation vectorizer orchestrating all components
 import os
 import sys
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # Add src directory to Python path when running as standalone script
 if __name__ == "__main__":
@@ -17,6 +17,7 @@ if __name__ == "__main__":
 from models.conversation_chunk import ConversationChunk, SearchResult
 from services.processing.text_processor import TextProcessor
 from services.processing.vector_generator import HybridVectorGenerator
+from services.processing.reranker import Reranker
 from services.database.zilliz_bm25_client import ZillizBM25Client
 from services.data.extract_text_fromS3 import S3JsonTextExtractor
 
@@ -39,6 +40,8 @@ class ConversationVectorizer:
         bm25_collection_name: str = "conversation_chunks_bm25",
         dense_query_prefix: str = "検索クエリ: ",
         dense_document_prefix: str = "検索文書: ",
+        reranker_model: Optional[str] = None,
+        rerank_candidates: Optional[int] = None,
     ):
         """
         Initialize conversation vectorizer
@@ -53,6 +56,12 @@ class ConversationVectorizer:
             dense_query_prefix / dense_document_prefix: ruri-v3 uses asymmetric
                               retrieval prefixes ("1+3 prefix scheme"); pass "" for
                               models that don't use them.
+            reranker_model: CrossEncoder used to re-score hybrid search
+                              candidates. None reads RERANKER_MODEL from the
+                              environment; "" (or an unset variable) disables
+                              reranking.
+            rerank_candidates: How many hybrid results the reranker re-scores.
+                              None reads RERANK_CANDIDATES (default 10).
         """
         # Initialize components
         print("🔧 Initializing TextProcessor...")
@@ -81,6 +90,17 @@ class ConversationVectorizer:
         else:
             print("⚠️ ZILLIZ_URI not provided - skipping ZillizBM25Client initialization")
             self.bm25_client = None
+
+        if reranker_model is None:
+            reranker_model = os.getenv("RERANKER_MODEL", "")
+        if rerank_candidates is None:
+            rerank_candidates = int(os.getenv("RERANK_CANDIDATES", "10"))
+        self.rerank_candidates = rerank_candidates
+        self.reranker = None
+        if reranker_model:
+            print(f"🔧 Initializing Reranker ({reranker_model})...")
+            self.reranker = Reranker(reranker_model)
+            print("✅ Reranker initialized")
 
         print("✅ ConversationVectorizer initialized with all components")
 
@@ -125,6 +145,9 @@ class ConversationVectorizer:
         """
         Perform hybrid search using the native-BM25 collection: dense ANN
         combined server-side with BM25 full-text search on the raw query text.
+        When a reranker is configured, the top `rerank_candidates` fused
+        results (at least `limit`) are re-scored by the cross-encoder and the
+        best `limit` are returned.
         Args:
             query: Search query
             limit: Number of final results
@@ -141,7 +164,13 @@ class ConversationVectorizer:
                 self.vector_generator.dense_generator.generate_query_embedding(query)
             )
 
-            return self.bm25_client.hybrid_search(dense_query, query, limit, rerank_k)
+            if not self.reranker:
+                return self.bm25_client.hybrid_search(dense_query, query, limit, rerank_k)
+
+            candidates = self.bm25_client.hybrid_search(
+                dense_query, query, max(limit, self.rerank_candidates), rerank_k
+            )
+            return self.reranker.rerank(query, candidates, limit)
 
         except Exception as e:
             print(f"❌ BM25 hybrid search error: {e}")
