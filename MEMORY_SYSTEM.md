@@ -88,9 +88,14 @@ Chat with the bot using REST API with automatic session management.
 ```json
 {
   "query": "今日の天気は？",
-  "user_id": "optional-user-id"
+  "user_id": "user_id-from-a-previous-response"
 }
 ```
+
+`user_id` is optional. Omit it on the first message: the server issues a signed
+`user_id` in the response. Send that value back to continue the session. A
+`user_id` the server didn't issue (e.g. a made-up `"user123"`) is ignored and a
+new session is started, so one client can't read or extend another's history.
 
 **Response:**
 ```json
@@ -101,7 +106,7 @@ Chat with the bot using REST API with automatic session management.
   "timestamp": "2026-01-31T10:00:00Z",
   "tokens_used": 150,
   "file_names": ["source.json"],
-  "user_id": "uuid-or-provided-id"
+  "user_id": "server-issued-signed-id"
 }
 ```
 
@@ -130,7 +135,7 @@ Clear conversation history for a user.
 **Request:**
 ```json
 {
-  "user_id": "user-id-here"
+  "user_id": "user_id-from-api-chat"
 }
 ```
 
@@ -138,9 +143,11 @@ Clear conversation history for a user.
 ```json
 {
   "status": "success",
-  "message": "Session cleared for user-id-here"
+  "message": "Session cleared"
 }
 ```
+
+Returns `403` if `user_id` wasn't issued by this server.
 
 ### POST /api/session/export
 
@@ -149,14 +156,17 @@ Export complete conversation history.
 **Request:**
 ```json
 {
-  "user_id": "user-id-here"
+  "user_id": "user_id-from-api-chat"
 }
 ```
+
+Returns `403` if `user_id` wasn't issued by this server, `404` if the session
+has expired or was cleared.
 
 **Response:**
 ```json
 {
-  "user_id": "user-id-here",
+  "user_id": "user_id-from-api-chat",
   "created_at": "2026-01-31T09:30:00Z",
   "last_accessed": "2026-01-31T10:00:00Z",
   "total_tokens": 150,
@@ -248,16 +258,16 @@ MAX_CONVERSATION_TURNS=10  # 5 back-and-forth turns
 ```python
 import requests
 
-# First message
+# First message: no user_id, the server issues one
 response1 = requests.post("http://localhost:7860/api/chat", json={
     "query": "私の名前は太郎です",
-    "user_id": "user123"
 })
+user_id = response1.json()["user_id"]
 
 # Follow-up (bot remembers name)
 response2 = requests.post("http://localhost:7860/api/chat", json={
     "query": "私の名前は何ですか？",
-    "user_id": "user123"
+    "user_id": user_id,
 })
 
 print(response2.json()["answer"])  # Should mention "太郎"
@@ -268,7 +278,7 @@ print(response2.json()["answer"])  # Should mention "太郎"
 ```python
 # Clear conversation history
 requests.post("http://localhost:7860/api/session/clear", json={
-    "user_id": "user123"
+    "user_id": user_id  # from a previous /api/chat response
 })
 ```
 
@@ -277,7 +287,7 @@ requests.post("http://localhost:7860/api/session/clear", json={
 ```python
 # Export for analysis
 response = requests.post("http://localhost:7860/api/session/export", json={
-    "user_id": "user123"
+    "user_id": user_id  # from a previous /api/chat response
 })
 
 history = response.json()
@@ -293,10 +303,9 @@ When writing tests that use session memory:
 
 ```python
 def test_with_memory():
-    user_id = f"test_{int(time.time() * 1000)}"  # Unique ID
-
-    # Send messages
-    response1 = chat_with_memory(query="Hello", user_id=user_id)
+    # The first call (no user_id) starts a session; reuse the issued id
+    response1 = chat_with_memory(query="Hello")
+    user_id = response1["user_id"]
     response2 = chat_with_memory(query="What did I say?", user_id=user_id)
 
     # Clean up
@@ -319,7 +328,7 @@ Inspect specific session:
 ```bash
 curl -X POST http://localhost:7860/api/session/export \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "user123"}'
+  -d '{"user_id": "<user_id from an /api/chat response>"}'
 ```
 
 ## Troubleshooting
@@ -330,15 +339,18 @@ curl -X POST http://localhost:7860/api/session/export \
 
 **Causes & Solutions**:
 
-1. **Different user_ids**: Ensure you're using the same `user_id` across requests
+1. **Different user_ids**: Send back the `user_id` the server returned
    ```python
-   # ❌ Wrong: new ID each time
-   response = chat(query="Hi")  # auto-generates new ID
+   # ❌ Wrong: new ID each time, or a made-up ID (ignored by the server)
+   response = chat(query="Hi")
+   response = chat(query="Hi", user_id="user123")
 
-   # ✅ Correct: consistent ID
-   user_id = "user123"
-   response = chat(query="Hi", user_id=user_id)
+   # ✅ Correct: reuse the server-issued ID
+   user_id = chat(query="Hi")["user_id"]
+   response = chat(query="And then?", user_id=user_id)
    ```
+   IDs are signed with `FLASK_SECRET_KEY`. If it isn't set, a random key is
+   used and every issued ID becomes invalid when the server restarts.
 
 2. **Session expired**: Default 30 minutes idle timeout
    - Check `SESSION_EXPIRY_SECONDS` in `.env`
@@ -422,14 +434,14 @@ curl -X POST http://localhost:7860/api/session/export \
 ### 1. User ID Management
 
 **DO:**
-- Generate UUID for new users: `str(uuid.uuid4())`
-- Store user_id on client side (localStorage, cookie)
-- Use consistent user_id across requests
+- Let the server issue the user_id (omit it on the first `/api/chat` call)
+- Store the issued user_id on the client side (localStorage, cookie)
+- Send the same issued user_id on every later request
+- Set `FLASK_SECRET_KEY` in production so issued IDs survive restarts
 
 **DON'T:**
-- Use sensitive data as user_id
-- Share user_ids between different users
-- Rely on auto-generation for persistent sessions
+- Make up your own user_id (the server ignores IDs it didn't issue)
+- Share a user_id between different users: it grants access to that history
 
 ### 2. Session Lifecycle
 
