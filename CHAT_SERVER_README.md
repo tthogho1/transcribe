@@ -40,12 +40,19 @@ Transcribe/
 ├── requirements.txt           # Python dependencies
 └── src/
     ├── api/
-    │   └── chat_server.py     # Flask application
+    │   ├── chat_server.py     # Flask app: REST routes, Socket.IO, create_app()
+    │   └── auth.py            # Signed user_id tokens
     ├── models/
     │   └── conversation_chunk.py
     ├── core/
-    │   └── conversation_vectorizer.py
+    │   └── conversation_vectorizer.py  # Hybrid search over Zilliz
     └── services/
+        ├── chat/
+        │   ├── service.py     # ChatService: translate → follow-up check → search → answer
+        │   ├── generator.py   # OpenAI answer generation
+        │   ├── prompts.py     # Prompts sent to OpenAI
+        │   └── language.py    # Japanese / non-Japanese detection
+        ├── session/           # Conversation memory (Redis or in-memory)
         ├── data/
         ├── processing/
         ├── database/
