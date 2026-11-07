@@ -23,6 +23,9 @@ RERANK_CANDIDATES=10      # hybrid results re-scored per question
 CONTEXT_CHUNKS_BEFORE=1
 CONTEXT_CHUNKS_AFTER=3
 
+# Zilliz collection used for search and embedding (dense + native BM25)
+ZILLIZ_BM25_COLLECTION=conversation_chunks_bm25
+
 # AWS Configuration (if using S3 data extraction)
 AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key

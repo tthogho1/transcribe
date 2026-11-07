@@ -56,7 +56,7 @@ class ConversationVectorizer:
         embedding_model: str = "cl-nagoya/ruri-v3-310m",
         chunk_size: int = 300,
         chunk_overlap: int = 50,
-        bm25_collection_name: str = "conversation_chunks_bm25",
+        bm25_collection_name: Optional[str] = None,
         dense_query_prefix: str = "検索クエリ: ",
         dense_document_prefix: str = "検索文書: ",
         reranker_model: Optional[str] = None,
@@ -71,7 +71,11 @@ class ConversationVectorizer:
                               (768D, matches the existing dense_vector schema).
             chunk_size: Chunk size in characters
             chunk_overlap: Overlap size in characters
-            bm25_collection_name: Zilliz collection name (dense + native BM25 sparse)
+            bm25_collection_name: Zilliz collection name (dense + native BM25 sparse).
+                              None reads ZILLIZ_BM25_COLLECTION (default
+                              "conversation_chunks_bm25"). This is deliberately not
+                              ZILLIZ_COLLECTION_NAME, which older deployments still
+                              set to the retired TF-IDF collection.
             dense_query_prefix / dense_document_prefix: ruri-v3 uses asymmetric
                               retrieval prefixes ("1+3 prefix scheme"); pass "" for
                               models that don't use them.
@@ -96,7 +100,12 @@ class ConversationVectorizer:
         )
         print("✅ HybridVectorGenerator initialized")
 
-        print("🔧 Initializing ZillizBM25Client...")
+        if bm25_collection_name is None:
+            bm25_collection_name = os.getenv(
+                "ZILLIZ_BM25_COLLECTION", "conversation_chunks_bm25"
+            )
+
+        print(f"🔧 Initializing ZillizBM25Client (collection: {bm25_collection_name})...")
         if zilliz_uri:
             try:
                 self.bm25_client = ZillizBM25Client(
