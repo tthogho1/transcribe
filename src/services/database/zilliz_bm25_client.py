@@ -53,7 +53,7 @@ class ZillizBM25Client:
         self,
         uri: str,
         token: str,
-        collection_name: str = "conversation_chunks_bm25",
+        collection_name: str = "conversation_chunks_bm25_v2",
         analyzer_params: Dict[str, Any] = None,
     ):
         """
