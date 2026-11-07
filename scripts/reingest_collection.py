@@ -9,14 +9,14 @@ Unlike generate_embeddings_with_vectorizer.py, this script:
   - processes every transcript, not only videos with embedding=false
   - never changes the DynamoDB transcribed/embedding flags
   - inserts in batches and refuses to write into the live collection
-    (conversation_chunks_bm25, which the chat server on the HF Space uses), so
+    (conversation_chunks_bm25_v2, which the chat server on the HF Space uses), so
     a forgotten or mistyped name can't mix new chunks into the index users
     are searching
 
 Usage (from the project root):
-  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v2 --dry-run --limit 5
-  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v2 --limit 5
-  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v2 --resume
+  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v3 --dry-run --limit 5
+  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v3 --limit 5
+  python scripts/reingest_collection.py --collection conversation_chunks_bm25_v3 --resume
 
 --resume skips videos that already have chunks in the target collection, so
 an interrupted run can be continued. Videos are inserted whole (a batch never
@@ -50,7 +50,7 @@ from pymilvus import MilvusClient  # noqa: E402
 
 logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
-LIVE_COLLECTION = "conversation_chunks_bm25"
+LIVE_COLLECTION = "conversation_chunks_bm25_v2"
 SUFFIX = "_transcription.json"
 
 
@@ -107,7 +107,7 @@ def main() -> None:
     args = parse_args()
     if args.collection == LIVE_COLLECTION:
         sys.exit(f"Refusing to write into the live collection '{LIVE_COLLECTION}'. "
-                 "Use a new name such as conversation_chunks_bm25_v2.")
+                 "Use a new name such as conversation_chunks_bm25_v3.")
 
     uri, token = os.getenv("ZILLIZ_URI"), os.getenv("ZILLIZ_TOKEN")
     if not args.dry_run and not (uri and token):

@@ -6,7 +6,7 @@ Hugging Face Spaces（Docker SDK, CPU Free Tier）にデプロイする手順を
 ## 📋 前提条件
 
 - Hugging Face アカウント
-- Zilliz Cloud アカウント（ベクトルデータベース、`conversation_chunks_bm25` コレクションにデータ投入済みであること）
+- Zilliz Cloud アカウント（ベクトルデータベース、`conversation_chunks_bm25_v2` コレクションにデータ投入済みであること。別名のコレクションを使う場合は `ZILLIZ_BM25_COLLECTION` で指定）
 - OpenAI API キー
 
 ## ⚠️ CPU 無料版の制約

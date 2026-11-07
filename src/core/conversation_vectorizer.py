@@ -73,7 +73,7 @@ class ConversationVectorizer:
             chunk_overlap: Overlap size in characters
             bm25_collection_name: Zilliz collection name (dense + native BM25 sparse).
                               None reads ZILLIZ_BM25_COLLECTION (default
-                              "conversation_chunks_bm25"). This is deliberately not
+                              "conversation_chunks_bm25_v2"). This is deliberately not
                               ZILLIZ_COLLECTION_NAME, which older deployments still
                               set to the retired TF-IDF collection.
             dense_query_prefix / dense_document_prefix: ruri-v3 uses asymmetric
@@ -102,7 +102,7 @@ class ConversationVectorizer:
 
         if bm25_collection_name is None:
             bm25_collection_name = os.getenv(
-                "ZILLIZ_BM25_COLLECTION", "conversation_chunks_bm25"
+                "ZILLIZ_BM25_COLLECTION", "conversation_chunks_bm25_v2"
             )
 
         print(f"🔧 Initializing ZillizBM25Client (collection: {bm25_collection_name})...")
