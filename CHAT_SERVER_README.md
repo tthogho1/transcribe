@@ -13,10 +13,10 @@ pip install -r requirements.txt
 Copy the environment template and configure your settings:
 
 ```bash
-copy env_template.txt .env
+cp .env.example .env    # Windows: copy .env.example .env
 ```
 
-Edit `.env` file with your actual credentials:
+Edit `.env` with your actual credentials (`.env.example` lists every setting with its default):
 
 - `ZILLIZ_URI` - Your Zilliz Cloud URI
 - `ZILLIZ_TOKEN` - Your Zilliz Cloud token
@@ -36,7 +36,7 @@ python run_chat_server.py
 Transcribe/
 ├── run_chat_server.py          # Main server runner
 ├── .env                        # Environment variables (create from template)
-├── env_template.txt           # Environment template
+├── .env.example               # Environment template
 ├── requirements.txt           # Python dependencies
 └── src/
     ├── api/
