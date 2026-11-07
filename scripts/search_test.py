@@ -4,6 +4,7 @@ Initializes the vectorizer and performs a BM25 hybrid search
 """
 
 import os
+import logging
 import sys
 
 # Add src directory to Python path
@@ -76,4 +77,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Show ConversationVectorizer's progress (it logs instead of printing);
+    # other libraries stay at WARNING.
+    logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stdout)
+    logging.getLogger("core").setLevel(logging.INFO)
     main()

@@ -26,6 +26,7 @@ Usage examples:
 from __future__ import annotations
 
 import os
+import logging
 import sys
 import json
 import time
@@ -332,4 +333,8 @@ def main():
 
 
 if __name__ == "__main__":  # pragma: no cover
+    # Show ConversationVectorizer's progress (it logs instead of printing);
+    # other libraries stay at WARNING.
+    logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stdout)
+    logging.getLogger("core").setLevel(logging.INFO)
     main()
