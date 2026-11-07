@@ -258,6 +258,30 @@ def test_error_reply_is_not_saved_to_history(chat_server, monkeypatch, client_an
     assert sessions.get_history_for_openai(session_id) == []
 
 
+def test_search_outage_returns_error_not_a_made_up_answer(chat_server, monkeypatch, client_and_sessions):
+    """If Zilliz is down, the user gets an error, not an answer built from no context."""
+    client, sessions = client_and_sessions
+    service = chat_server.chat_service
+    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: {"is_follow_up": False, "search_query": q})
+
+    def outage(q, limit=5):
+        raise ConnectionError("zilliz down")
+
+    monkeypatch.setattr(service, "search", outage)
+    generate = MagicMock()
+    monkeypatch.setattr(service.ai_generator, "generate_response", generate)
+
+    res = client.post("/api/chat", json={"query": "駅そばの話は？"})
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert "エラー" in body["answer"]
+    assert body["sources"] == []
+    generate.assert_not_called()  # no answer is generated without search results
+    session_id = chat_server.verify_user_token(body["user_id"])
+    assert sessions.get_history_for_openai(session_id) == []
+
+
 def test_processing_failure_is_marked_as_error(chat_server, monkeypatch):
     service = chat_server.chat_service
 

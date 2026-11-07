@@ -165,7 +165,7 @@ def main() -> None:
             continue
 
         chunks = vectorizer.text_processor.process_text(text, key, titles.get(video_id, ""))
-        vecs = vectorizer.vector_generator.dense_generator.generate([c.text for c in chunks])
+        vecs = vectorizer.dense_generator.generate([c.text for c in chunks])
         buf_chunks.extend(chunks)
         buf_vecs.append(vecs)
         stats["videos"] += 1
@@ -192,4 +192,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Show ConversationVectorizer's progress (it logs instead of printing);
+    # other libraries stay at WARNING.
+    logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stdout)
+    logging.getLogger("core").setLevel(logging.INFO)
     main()

@@ -83,30 +83,3 @@ class DenseVectorGenerator:
         embedding = self.model.encode([prefixed_query])
         embedding = embedding / np.linalg.norm(embedding, axis=1, keepdims=True)
         return embedding
-
-
-class HybridVectorGenerator:
-    """Generates dense embeddings; sparse (BM25) vectors are derived server-side by Zilliz"""
-
-    def __init__(
-        self,
-        dense_model: str = "sonoisa/sentence-bert-base-ja-mean-tokens-v2",
-        tokenizer=None,
-        dense_query_prefix: str = "",
-        dense_document_prefix: str = "",
-    ):
-        """
-        Initialize hybrid vector generator
-        Args:
-            dense_model: SentenceTransformer model name
-            tokenizer: Text tokenizer for preprocessing
-            dense_query_prefix: Prefix for query-side dense encoding (see DenseVectorGenerator)
-            dense_document_prefix: Prefix for document-side dense encoding
-        """
-        self.dense_generator = DenseVectorGenerator(
-            dense_model,
-            query_prefix=dense_query_prefix,
-            document_prefix=dense_document_prefix,
-        )
-        self.tokenizer = tokenizer
-        print("✅ Initialized hybrid vector generator")
