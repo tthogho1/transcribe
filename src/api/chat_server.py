@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import re
+import secrets
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any
@@ -17,7 +18,9 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from openai import OpenAI
 from dotenv import load_dotenv
-from langdetect import detect
+from itsdangerous import BadSignature, URLSafeSerializer
+from langdetect import detect, DetectorFactory
+from langdetect.lang_detect_exception import LangDetectException
 from deep_translator import GoogleTranslator
 
 # Import from our models
@@ -52,6 +55,61 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # OpenAI client will be initialized in the generator using environment variables
 
+# REST session IDs are issued and signed by the server, so a client can only
+# use (export, clear, or chat with the history of) an ID it was given.
+_secret_key = os.getenv("FLASK_SECRET_KEY")
+if not _secret_key:
+    logger.warning(
+        "FLASK_SECRET_KEY is not set; using a random key, so REST user_ids "
+        "become invalid when the server restarts"
+    )
+    _secret_key = secrets.token_hex(32)
+_user_id_signer = URLSafeSerializer(_secret_key, salt="chat-user-id")
+
+
+def issue_user_token() -> tuple:
+    """Create a new session: returns (token for the client, internal session id)."""
+    session_id = str(uuid.uuid4())
+    return _user_id_signer.dumps(session_id), session_id
+
+
+def verify_user_token(token) -> str:
+    """Return the session id inside a token this server issued, else None."""
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        session_id = _user_id_signer.loads(token)
+    except BadSignature:
+        return None
+    return session_id if isinstance(session_id, str) else None
+
+# langdetect is probabilistic; seed it so the same text always gets the same answer.
+DetectorFactory.seed = 0
+
+# Hiragana, katakana (incl. half-width) and CJK ideographs.
+_JAPANESE_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]")
+
+
+def detect_language(text: str) -> str:
+    """Return a langdetect code for `text`, or "unknown" if it can't tell
+    (empty text, or only digits/punctuation/emoji)."""
+    try:
+        return detect(text)
+    except LangDetectException:
+        return "unknown"
+
+
+def is_japanese_query(text: str) -> bool:
+    """True if the user's query should be handled as Japanese.
+
+    Any kana or kanji counts as Japanese: langdetect often labels short
+    kanji-only queries (e.g. "東京駅") as Chinese or Korean. Text it can't
+    classify (e.g. "2024") also defaults to Japanese, the index's language.
+    """
+    if _JAPANESE_SCRIPT_RE.search(text):
+        return True
+    return detect_language(text) in ("ja", "unknown")
+
 
 @dataclass
 class ChatResponse:
@@ -64,6 +122,8 @@ class ChatResponse:
     tokens_used: int
     file_names: List[str]  # New field to store file names
     related_videos: List[Dict[str, str]] = field(default_factory=list)
+    # True when `answer` is an error message; such turns are not saved to history.
+    error: bool = False
 
 
 class OpenAIGenerator:
@@ -209,11 +269,15 @@ If the context doesn't contain enough information to answer the question, please
                 else:
                     raise
 
-            print(user_prompt)
-            answer = response.choices[0].message.content
+            logger.debug(user_prompt)
+            # content is None on refusals; never let None reach the session
+            # history, where it breaks every later request for this user.
+            answer = response.choices[0].message.content or ""
+            if not answer.strip():
+                raise ValueError("OpenAI returned an empty answer")
 
             # If English input but Japanese response generated, translate back to English
-            if is_english_input and detect(answer) == "ja":
+            if is_english_input and detect_language(answer) == "ja":
                 logger.info("Translating response back to English...")
                 en_translator = GoogleTranslator(source="ja", target="en")
                 answer = en_translator.translate(answer)
@@ -408,8 +472,7 @@ Rules:
         try:
             # Detect language for response formatting
             original_query = query
-            detected_language = detect(query)
-            is_english_input = detected_language != "ja"
+            is_english_input = not is_japanese_query(query)
 
             if is_english_input:
                 logger.info(
@@ -448,6 +511,7 @@ Rules:
                 tokens_used=ai_response["tokens_used"],
                 file_names=file_names,  # Include file names
                 related_videos=related_videos,
+                error="error" in ai_response,
             )
 
             return chat_response
@@ -466,6 +530,7 @@ Rules:
                 timestamp=datetime.now().isoformat(),
                 tokens_used=0,
                 file_names=[],  # Return empty file names on error
+                error=True,
             )
 
 
@@ -487,7 +552,14 @@ def api_chat():
     try:
         data = request.get_json()
         query = data.get("query", "").strip()
-        user_id = data.get("user_id", str(uuid.uuid4()))
+
+        # Only a server-issued user_id continues a session. A missing, made-up
+        # or tampered one starts a new session, so nobody can chat with (and
+        # have answers drawn from) another user's history.
+        user_token = data.get("user_id")
+        user_id = verify_user_token(user_token)
+        if user_id is None:
+            user_token, user_id = issue_user_token()
 
         logger.info(f"API /api/chat received query from {user_id}: {query}")
 
@@ -508,16 +580,19 @@ def api_chat():
             conversation_history=conversation_history
         )
 
-        # Add user message to history
-        session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
-
-        # Add assistant response to history
-        session_manager.add_message(
-            user_id,
-            "assistant",
-            response.answer,
-            tokens=response.tokens_used
-        )
+        # Save the exchange, unless the answer is an error message: that would
+        # become "context" for the next turn.
+        if not response.error:
+            session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
+            # Count the answer's own size, not response.tokens_used (the whole
+            # call incl. RAG context), or the trimmer drops all but the last
+            # exchange.
+            session_manager.add_message(
+                user_id,
+                "assistant",
+                response.answer,
+                tokens=len(response.answer) // 4
+            )
 
         response_dict = {
             "answer": response.answer,
@@ -536,7 +611,7 @@ def api_chat():
             "tokens_used": response.tokens_used,
             "file_names": response.file_names,
             "related_videos": response.related_videos,
-            "user_id": user_id,  # Return user_id for client tracking
+            "user_id": user_token,  # send this back to continue the session
         }
         return Response(
             json.dumps(response_dict, ensure_ascii=False), mimetype="application/json"
@@ -551,6 +626,9 @@ def api_chat():
         )
 
 
+MAX_SEARCH_LIMIT = 20
+
+
 @app.route("/api/search", methods=["POST"])
 def api_search():
     """REST API endpoint for conversation search only"""
@@ -563,6 +641,14 @@ def api_search():
 
         if not query:
             return jsonify({"error": "Query is required"}), 400
+
+        # bool is an int subclass; reject it along with strings/floats.
+        if isinstance(limit, bool) or not isinstance(limit, int) or not (
+            1 <= limit <= MAX_SEARCH_LIMIT
+        ):
+            return jsonify(
+                {"error": f"limit must be an integer from 1 to {MAX_SEARCH_LIMIT}"}
+            ), 400
 
         # Search conversations using the configured backend (dense + sparse)
         results = chat_service.search(query, limit)
@@ -594,16 +680,20 @@ def api_clear_session():
     """Clear conversation history for user"""
     try:
         data = request.get_json()
-        user_id = data.get("user_id")
+        user_token = data.get("user_id")
 
-        if not user_id:
+        if not user_token:
             return jsonify({"error": "user_id is required"}), 400
+
+        user_id = verify_user_token(user_token)
+        if user_id is None:
+            return jsonify({"error": "invalid user_id"}), 403
 
         session_manager.clear_session(user_id)
 
         return jsonify({
             "status": "success",
-            "message": f"Session cleared for {user_id}"
+            "message": "Session cleared"
         })
 
     except Exception as e:
@@ -616,10 +706,14 @@ def api_export_session():
     """Export conversation history for user"""
     try:
         data = request.get_json()
-        user_id = data.get("user_id")
+        user_token = data.get("user_id")
 
-        if not user_id:
+        if not user_token:
             return jsonify({"error": "user_id is required"}), 400
+
+        user_id = verify_user_token(user_token)
+        if user_id is None:
+            return jsonify({"error": "invalid user_id"}), 403
 
         session = session_manager.get_session(user_id)
 
@@ -627,7 +721,7 @@ def api_export_session():
             return jsonify({"error": "No session found"}), 404
 
         return jsonify({
-            "user_id": session.user_id,
+            "user_id": user_token,
             "created_at": session.created_at,
             "last_accessed": session.last_accessed,
             "total_tokens": session.total_tokens,
@@ -722,14 +816,15 @@ def handle_chat_message(data):
             conversation_history=conversation_history
         )
 
-        # Add to session
-        session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
-        session_manager.add_message(
-            user_id,
-            "assistant",
-            response.answer,
-            tokens=response.tokens_used
-        )
+        # Add to session (error replies are not saved as history)
+        if not response.error:
+            session_manager.add_message(user_id, "user", query, tokens=len(query) // 4)
+            session_manager.add_message(
+                user_id,
+                "assistant",
+                response.answer,
+                tokens=len(response.answer) // 4  # answer size, not whole-call usage
+            )
 
         # Send response
         emit(
