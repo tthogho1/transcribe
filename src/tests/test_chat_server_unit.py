@@ -94,14 +94,15 @@ def test_detect_language_never_raises(chat_server):
 def test_kanji_only_query_is_answered_in_japanese(chat_server, monkeypatch):
     service = chat_server.chat_service
     monkeypatch.setattr(service, "search", lambda q, limit=5: [_result()])
-    generate = MagicMock(return_value={"answer": "答え", "tokens_used": 10, "model": "m"})
-    monkeypatch.setattr(service.ai_generator, "generate_response", generate)
+    generate = MagicMock(return_value=chat_server.GeneratedAnswer("答え", 10))
+    monkeypatch.setattr(service.generator, "generate", generate)
     translate = MagicMock()
     monkeypatch.setattr(service.translator, "translate", translate)
 
     service.process_chat_query("東京駅")
 
-    assert generate.call_args.kwargs["is_english_input"] is False
+    answer_in_english = generate.call_args.args[3]
+    assert answer_in_english is False
     translate.assert_not_called()
 
 
@@ -109,8 +110,8 @@ def test_digit_only_query_does_not_error(chat_server, monkeypatch):
     service = chat_server.chat_service
     monkeypatch.setattr(service, "search", lambda q, limit=5: [])
     monkeypatch.setattr(
-        service.ai_generator, "generate_response",
-        MagicMock(return_value={"answer": "答え", "tokens_used": 10, "model": "m"}),
+        service.generator, "generate",
+        MagicMock(return_value=chat_server.GeneratedAnswer("答え", 10)),
     )
 
     response = service.process_chat_query("2024")
@@ -122,16 +123,19 @@ def test_digit_only_query_does_not_error(chat_server, monkeypatch):
 
 @pytest.mark.parametrize("content", [None, "", "   "])
 def test_empty_openai_answer_becomes_error_message(chat_server, monkeypatch, content):
-    gen = chat_server.chat_service.ai_generator
+    service = chat_server.chat_service
+    monkeypatch.setattr(service, "search", lambda q, limit=5: [_result()])
     monkeypatch.setattr(
-        gen.client.chat.completions, "create",
+        service.generator.client.chat.completions, "create",
         MagicMock(return_value=_openai_response(content)),
     )
 
-    result = gen.generate_response("質問", [_result()])
+    with pytest.raises(ValueError):
+        service.generator.generate("質問", [_result()], [], False)
 
-    assert isinstance(result["answer"], str) and result["answer"].strip()
-    assert "error" in result
+    response = service.process_chat_query("質問")
+    assert response.error is True
+    assert isinstance(response.answer, str) and "エラー" in response.answer
 
 
 # --- session token accounting -----------------------------------------------
@@ -147,12 +151,12 @@ def client_and_sessions(chat_server, monkeypatch):
 def test_session_keeps_history_when_calls_use_many_tokens(chat_server, monkeypatch, client_and_sessions):
     client, sessions = client_and_sessions
     service = chat_server.chat_service
-    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: {"is_follow_up": True, "search_query": q})
+    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: chat_server.QueryAnalysis(True, q))
     monkeypatch.setattr(service, "search", lambda q, limit=5: [_result()])
     # Each call reports far more than MAX_CONVERSATION_TOKENS (default 4000).
     monkeypatch.setattr(
-        service.ai_generator, "generate_response",
-        lambda **kw: {"answer": "答えです", "tokens_used": 9000, "model": "m"},
+        service.generator, "generate",
+        lambda *a, **kw: chat_server.GeneratedAnswer("答えです", 9000),
     )
 
     token = None
@@ -174,11 +178,11 @@ def test_session_keeps_history_when_calls_use_many_tokens(chat_server, monkeypat
 @pytest.fixture
 def fake_answers(chat_server, monkeypatch):
     service = chat_server.chat_service
-    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: {"is_follow_up": True, "search_query": q})
+    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: chat_server.QueryAnalysis(True, q))
     monkeypatch.setattr(service, "search", lambda q, limit=5: [_result()])
     monkeypatch.setattr(
-        service.ai_generator, "generate_response",
-        lambda **kw: {"answer": "答えです", "tokens_used": 10, "model": "m"},
+        service.generator, "generate",
+        lambda *a, **kw: chat_server.GeneratedAnswer("答えです", 10),
     )
 
 
@@ -244,12 +248,13 @@ def test_export_and_clear_work_with_issued_token(chat_server, fake_answers, clie
 def test_error_reply_is_not_saved_to_history(chat_server, monkeypatch, client_and_sessions):
     client, sessions = client_and_sessions
     service = chat_server.chat_service
-    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: {"is_follow_up": False, "search_query": q})
+    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: chat_server.QueryAnalysis(False, q))
     monkeypatch.setattr(service, "search", lambda q, limit=5: [])
-    monkeypatch.setattr(
-        service.ai_generator, "generate_response",
-        lambda **kw: {"answer": "エラーが発生しました", "tokens_used": 0, "model": "m", "error": "boom"},
-    )
+
+    def boom(*a, **kw):
+        raise RuntimeError("openai down")
+
+    monkeypatch.setattr(service.generator, "generate", boom)
 
     res = client.post("/api/chat", json={"query": "こんにちは"})
 
@@ -262,14 +267,14 @@ def test_search_outage_returns_error_not_a_made_up_answer(chat_server, monkeypat
     """If Zilliz is down, the user gets an error, not an answer built from no context."""
     client, sessions = client_and_sessions
     service = chat_server.chat_service
-    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: {"is_follow_up": False, "search_query": q})
+    monkeypatch.setattr(service, "analyze_query", lambda q, h=None: chat_server.QueryAnalysis(False, q))
 
     def outage(q, limit=5):
         raise ConnectionError("zilliz down")
 
     monkeypatch.setattr(service, "search", outage)
     generate = MagicMock()
-    monkeypatch.setattr(service.ai_generator, "generate_response", generate)
+    monkeypatch.setattr(service.generator, "generate", generate)
 
     res = client.post("/api/chat", json={"query": "駅そばの話は？"})
 
@@ -315,3 +320,82 @@ def test_search_accepts_valid_limit(chat_server, monkeypatch, body, expected):
 
     assert res.status_code == 200
     search.assert_called_once_with("駅そば", expected)
+
+
+# --- request validation and error responses ---------------------------------
+
+@pytest.mark.parametrize("path", ["/api/chat", "/api/search", "/api/session/clear", "/api/session/export"])
+@pytest.mark.parametrize("body, content_type", [
+    ("not json", "text/plain"),
+    ("[1, 2]", "application/json"),
+    ("null", "application/json"),
+    ("{broken", "application/json"),
+])
+def test_non_object_body_is_400(chat_server, path, body, content_type):
+    res = chat_server.app.test_client().post(path, data=body, content_type=content_type)
+
+    assert res.status_code == 400
+    assert res.get_json() == {"error": "Request body must be a JSON object"}
+
+
+@pytest.mark.parametrize("query", [123, None, ["駅そば"], "   "])
+def test_non_string_or_blank_query_is_400(chat_server, query):
+    res = chat_server.app.test_client().post("/api/chat", json={"query": query})
+
+    assert res.status_code == 400
+    assert res.get_json() == {"error": "Query is required"}
+
+
+def test_unexpected_error_hides_details(chat_server, monkeypatch):
+    def outage(q, limit=5):
+        raise ConnectionError("zilliz down at in03-secret-host:19530")
+
+    monkeypatch.setattr(chat_server.chat_service, "search", outage)
+
+    res = chat_server.app.test_client().post("/api/search", json={"query": "駅そば"})
+
+    assert res.status_code == 500
+    assert res.get_json() == {"error": "Internal server error"}
+    assert "secret-host" not in res.get_data(as_text=True)
+
+
+def test_unknown_route_is_still_404(chat_server):
+    client = chat_server.app.test_client()
+    assert client.get("/no-such-page").status_code == 404
+    assert client.get("/api/chat").status_code == 405  # POST only
+
+
+def test_json_keeps_japanese_readable(chat_server, fake_answers, client_and_sessions):
+    client, _ = client_and_sessions
+    raw = client.post("/api/chat", json={"query": "こんにちは"}).get_data(as_text=True)
+    assert "答えです" in raw  # not \\u7b54...
+
+
+# --- Socket.IO --------------------------------------------------------------
+
+def _socket_events(chat_server, *payloads):
+    sc = chat_server.socketio.test_client(chat_server.app)
+    for p in payloads:
+        sc.emit("chat_message", p)
+    events = sc.get_received()
+    sc.disconnect()
+    return [(e["name"], e["args"][0]) for e in events if e["name"] != "status"]
+
+
+def test_socket_chat_answers_and_remembers(chat_server, fake_answers, client_and_sessions):
+    _, sessions = client_and_sessions
+
+    events = _socket_events(chat_server, {"query": " 駅そば "})
+
+    ((name, payload),) = events
+    assert name == "chat_response"
+    assert payload["answer"] == "答えです"
+    assert payload["sources"][0]["text"] == "駅そばの話"
+    assert "user_id" not in payload  # the socket connection is the session
+    (session_id,) = sessions.memory_store
+    assert [m["content"] for m in sessions.get_history_for_openai(session_id)] == ["駅そば", "答えです"]
+
+
+@pytest.mark.parametrize("payload", [None, "駅そば", {}, {"query": "  "}, {"query": 5}])
+def test_socket_rejects_bad_payload(chat_server, client_and_sessions, payload):
+    assert _socket_events(chat_server, payload) == [("chat_error", {"error": "Query is required"})]
