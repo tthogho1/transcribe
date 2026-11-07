@@ -1,100 +1,94 @@
 """
 Integration tests for chat with memory functionality
 Tests the full flow of conversation with session management
+
+Needs a running server at BASE_URL. The server issues signed user_ids: the
+first /api/chat call (without user_id) returns one, and later calls send it
+back to continue that session.
 """
 
 import pytest
 import requests
-import time
 
 BASE_URL = "http://localhost:7860"
 
 
-@pytest.fixture
-def unique_user_id():
-    """Generate a unique user ID for each test"""
-    return f"test_user_{int(time.time() * 1000)}"
+def chat(query, user_id=None, timeout=30):
+    """POST /api/chat; returns the response object."""
+    payload = {"query": query}
+    if user_id is not None:
+        payload["user_id"] = user_id
+    return requests.post(f"{BASE_URL}/api/chat", json=payload, timeout=timeout)
 
 
-def test_chat_with_memory_flow(unique_user_id):
+def start_session(query):
+    """Send the first message of a new session; returns (json, issued user_id)."""
+    response = chat(query)
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("user_id")
+    return data, data["user_id"]
+
+
+def test_chat_with_memory_flow():
     """Test full conversation flow with memory"""
     # First message: introduce name
-    response1 = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "私の名前は太郎です", "user_id": unique_user_id},
-        timeout=30
-    )
-    assert response1.status_code == 200
-    data1 = response1.json()
+    data1, user_id = start_session("私の名前は太郎です")
     assert "answer" in data1
-    assert "user_id" in data1
-    assert data1["user_id"] == unique_user_id
 
     # Second message: ask about name (should remember)
-    response2 = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "私の名前は何ですか？", "user_id": unique_user_id},
-        timeout=30
-    )
+    response2 = chat("私の名前は何ですか？", user_id)
     assert response2.status_code == 200
     data2 = response2.json()
-    # The assistant should mention the name from context
-    # Note: This depends on the LLM's response, so we just check it responded
-    assert "answer" in data2
+    # The same session continues
+    assert data2["user_id"] == user_id
+    # Note: the answer depends on the LLM, so we just check it responded
     assert len(data2["answer"]) > 0
 
 
-def test_session_export(unique_user_id):
+def test_session_export():
     """Test exporting session history"""
-    # Send a few messages
-    requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "こんにちは", "user_id": unique_user_id},
-        timeout=30
-    )
-    requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "元気ですか？", "user_id": unique_user_id},
-        timeout=30
-    )
+    _, user_id = start_session("こんにちは")
+    chat("元気ですか？", user_id)
 
-    # Export session
     response = requests.post(
         f"{BASE_URL}/api/session/export",
-        json={"user_id": unique_user_id},
+        json={"user_id": user_id},
         timeout=10
     )
     assert response.status_code == 200
     data = response.json()
 
-    assert "user_id" in data
-    assert "messages" in data
+    assert data["user_id"] == user_id
     assert len(data["messages"]) == 4  # 2 user + 2 assistant
 
 
-def test_session_clear(unique_user_id):
-    """Test clearing session history"""
-    # Send a message
-    requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "こんにちは", "user_id": unique_user_id},
-        timeout=30
+def test_session_export_rejects_unissued_user_id():
+    """A user_id the server didn't issue can't be used to read a session"""
+    response = requests.post(
+        f"{BASE_URL}/api/session/export",
+        json={"user_id": "user123"},
+        timeout=10
     )
+    assert response.status_code == 403
 
-    # Clear session
+
+def test_session_clear():
+    """Test clearing session history"""
+    _, user_id = start_session("こんにちは")
+
     response = requests.post(
         f"{BASE_URL}/api/session/clear",
-        json={"user_id": unique_user_id},
+        json={"user_id": user_id},
         timeout=10
     )
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
+    assert response.json()["status"] == "success"
 
-    # Try to export (should fail or return empty)
+    # The session is gone
     export_response = requests.post(
         f"{BASE_URL}/api/session/export",
-        json={"user_id": unique_user_id},
+        json={"user_id": user_id},
         timeout=10
     )
     assert export_response.status_code == 404  # No session found
@@ -125,26 +119,12 @@ def test_health_check_with_session_info():
     assert "active_sessions" in data["services"]
 
 
-def test_multi_user_isolation(unique_user_id):
+def test_multi_user_isolation():
     """Test that different users have isolated sessions"""
-    user1_id = f"{unique_user_id}_user1"
-    user2_id = f"{unique_user_id}_user2"
+    _, user1_id = start_session("私の名前は太郎です")
+    _, user2_id = start_session("私の名前は花子です")
+    assert user1_id != user2_id
 
-    # User 1 introduces name
-    requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "私の名前は太郎です", "user_id": user1_id},
-        timeout=30
-    )
-
-    # User 2 introduces different name
-    requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "私の名前は花子です", "user_id": user2_id},
-        timeout=30
-    )
-
-    # Export both sessions
     user1_export = requests.post(
         f"{BASE_URL}/api/session/export",
         json={"user_id": user1_id},
@@ -157,54 +137,36 @@ def test_multi_user_isolation(unique_user_id):
         timeout=10
     ).json()
 
-    # Verify sessions are different
     assert user1_export["user_id"] == user1_id
     assert user2_export["user_id"] == user2_id
     assert "太郎" in str(user1_export["messages"])
     assert "花子" in str(user2_export["messages"])
+    assert "花子" not in str(user1_export["messages"])
 
 
 def test_rag_with_memory():
     """Test that RAG results are combined with conversation memory"""
-    user_id = f"test_user_rag_{int(time.time() * 1000)}"
-
     # Ask about a topic that should retrieve RAG results
-    response1 = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "営業について教えて", "user_id": user_id},
-        timeout=30
-    )
-    assert response1.status_code == 200
-    data1 = response1.json()
+    data1, user_id = start_session("営業について教えて")
     assert "sources" in data1
-    # Should have RAG sources
-    assert len(data1.get("sources", [])) >= 0
 
     # Follow-up question referencing previous context
-    response2 = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "もっと詳しく教えて", "user_id": user_id},
-        timeout=30
-    )
+    response2 = chat("もっと詳しく教えて", user_id)
     assert response2.status_code == 200
-    data2 = response2.json()
-    # Should have both memory and RAG context
-    assert "answer" in data2
+    assert "answer" in response2.json()
 
 
 def test_auto_user_id_generation():
-    """Test that user_id is auto-generated if not provided"""
-    response = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={"query": "こんにちは"},  # No user_id
-        timeout=30
-    )
+    """A user_id is issued when none is provided"""
+    data, user_id = start_session("こんにちは")
+    assert isinstance(user_id, str) and len(user_id) > 36  # signed, not a bare UUID
+
+
+def test_unissued_user_id_gets_a_new_session():
+    """A made-up user_id is replaced with a newly issued one"""
+    response = chat("こんにちは", "user123")
     assert response.status_code == 200
-    data = response.json()
-    assert "user_id" in data
-    # UUID format check (8-4-4-4-12 hex digits)
-    assert len(data["user_id"]) == 36
-    assert data["user_id"].count("-") == 4
+    assert response.json()["user_id"] != "user123"
 
 
 if __name__ == "__main__":
