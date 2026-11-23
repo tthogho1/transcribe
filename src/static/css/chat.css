@@ -18,18 +18,46 @@ body {
 .header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  padding: 20px;
+  padding: 10px 20px;
   text-align: center;
 }
 
 .header h1 {
-  margin: 0 0 10px 0;
-  font-size: 2em;
+  margin: 0 0 4px 0;
+  font-size: 1.4em;
 }
 
 .header p {
   margin: 0;
+  font-size: 0.85em;
   opacity: 0.9;
+}
+
+/* Title on the left (centered in its space), QR code on the right */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.header-text {
+  flex: 1;
+}
+
+.header-qr {
+  margin: 0;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.header-qr img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  padding: 1px; /* white quiet zone so it scans on the purple background */
+  background: white;
+  border-radius: 6px;
+  image-rendering: pixelated; /* keep the modules sharp when scaled down */
 }
 
 .chat-container {
@@ -54,6 +82,8 @@ body {
   margin-bottom: 15px;
   padding: 10px;
   border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
   animation: fadeIn 0.3s ease-in;
 }
 
@@ -137,12 +167,14 @@ body {
   padding: 15px;
   background: #f8f9fa;
   border-bottom: 1px solid #eee;
+  font-size: 14px;
   font-weight: bold;
   color: #333;
 }
 
 .sources-content {
   padding: 15px;
+  font-size: 13px; /* also the "no results yet" message */
   overflow-y: auto;
   height: calc(600px - 60px);
 }
@@ -162,7 +194,7 @@ body {
 }
 
 .source-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
   margin-bottom: 5px;
   display: flex;
@@ -171,7 +203,7 @@ body {
 }
 
 .source-text {
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.4;
   color: #333;
 }
@@ -218,6 +250,11 @@ body {
 @media (max-width: 768px) {
   body {
     padding: 10px;
+  }
+
+  /* On a phone the QR code is pointless (it can't scan its own screen) */
+  .header-qr {
+    display: none;
   }
 
   .chat-container {

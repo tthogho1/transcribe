@@ -10,10 +10,21 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>🤖 AI Chat with Conversation Search</h1>
-        <p>
-          Ask questions about past conversations - AI will search and provide context-aware answers
-        </p>
+        <div class="header-text">
+          <h1>🤖 AI Chat with Conversation Search</h1>
+          <!-- chat.js shows the connection status in this paragraph (the first p in .header) -->
+          <p>
+            Ask questions about past conversations - AI will search and provide context-aware answers
+          </p>
+        </div>
+        <figure class="header-qr">
+          <img
+            src="{{ url_for('static', filename='image/QR_CharUrl.png') }}"
+            alt="このチャットページのURLのQRコード"
+            width="56"
+            height="56"
+          />
+        </figure>
       </div>
 
       <div class="chat-container">
@@ -21,7 +32,7 @@
           <div class="messages" id="messages">
             <div class="message ai-message">
               <strong>AI Assistant:</strong>
-              こんにちは！働く上での悩みに対して私の経験をもとにお答えします。
+              仕事に関する質問を入力してください。
             </div>
           </div>
 
