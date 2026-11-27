@@ -53,7 +53,9 @@ def server(chat_server, monkeypatch):
     vectorizer.search_passages.return_value = [_result()]
     generator = MagicMock()
     generator.generate.return_value = GeneratedAnswer("答えです", 10)
-    chat = ChatService(vectorizer=vectorizer, generator=generator, translator=MagicMock())
+    generator.llm = SimpleNamespace(provider="ollama", model="qwen2.5:7b")
+    chat = ChatService(vectorizer=vectorizer, generator=generator, translator=MagicMock(),
+                       rewrite_llm=SimpleNamespace(provider="ollama", model="qwen2.5:3b"))
     # Treat every question as a follow-up searched as asked.
     monkeypatch.setattr(chat, "analyze_query", lambda q, h: QueryAnalysis(True, q))
 
@@ -238,6 +240,7 @@ def test_health_reports_services(server):
     services = server.client.get("/health").get_json()["services"]
     assert services["zilliz"] == "connected"
     assert services["session_storage"] == "memory"
+    assert services["llm"] == {"provider": "ollama", "model": "qwen2.5:7b", "rewrite_model": "qwen2.5:3b"}
 
     server.vectorizer.bm25_client = None
     assert server.client.get("/health").get_json()["services"]["zilliz"] == "disconnected"

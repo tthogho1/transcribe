@@ -1,4 +1,4 @@
-"""Prompts sent to OpenAI: answer generation and the follow-up check."""
+"""Prompts sent to the chat LLM: answer generation and the follow-up check."""
 
 # System prompt for answers. AnswerGenerator appends the answer language.
 ANSWER_SYSTEM_PROMPT = """\

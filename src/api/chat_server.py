@@ -255,7 +255,7 @@ def health_check():
         "timestamp": datetime.now().isoformat(),
         "services": {
             "zilliz": "connected" if services().chat.is_search_connected else "disconnected",
-            "openai": "configured" if os.getenv("OPENAI_API_KEY") else "not configured",
+            "llm": services().chat.llm_info,
             "session_storage": session_stats.get("storage_type", "unknown"),
             "active_sessions": session_stats.get("active_sessions", 0),
         },
