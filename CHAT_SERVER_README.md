@@ -50,7 +50,8 @@ Transcribe/
         ├── chat/
         │   ├── service.py     # ChatService: translate → follow-up check → search → answer
         │   ├── generator.py   # Answer generation (via services/llm)
-        │   ├── prompts.py     # Prompts sent to OpenAI
+        │   ├── prompts.py     # Built-in prompts
+        │   ├── prompt_store.py # Answer prompts users choose / admins edit (/admin/prompts)
         │   └── language.py    # Japanese / non-Japanese detection
         ├── llm/               # LLM clients: OpenAI or Ollama, chosen by LLM_PROVIDER
         ├── session/           # Conversation memory (Redis or in-memory)

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Prompt Editor</title>
+    <style>
+      :root {
+        --accent: #667eea;
+        --border: #ddd;
+        --muted: #777;
+        --danger: #c62828;
+        --ok: #2e7d32;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 14px;
+        background: #f5f5f7;
+        color: #222;
+      }
+      main { max-width: 1100px; margin: 0 auto; }
+      h1 { font-size: 1.3em; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 16px; }
+      .card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      input, textarea, button { font: inherit; }
+      input[type='text'], input[type='password'], textarea {
+        width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 5px;
+      }
+      textarea { min-height: 420px; resize: vertical; line-height: 1.5; font-family: ui-monospace, Menlo, monospace; }
+      input[readonly], textarea[readonly] { background: #f3f3f5; color: #555; }
+      button {
+        padding: 8px 14px; border: 1px solid var(--accent); border-radius: 5px;
+        background: var(--accent); color: white; cursor: pointer;
+      }
+      button.secondary { background: white; color: var(--accent); }
+      button.danger { background: white; color: var(--danger); border-color: var(--danger); }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      #login .row input { flex: 1; min-width: 220px; }
+      #editor-area { display: grid; grid-template-columns: 260px 1fr; gap: 14px; margin-top: 14px; }
+      #prompt-list { list-style: none; margin: 8px 0 0; padding: 0; }
+      #prompt-list li {
+        padding: 8px; border-radius: 5px; cursor: pointer; border: 1px solid transparent;
+      }
+      #prompt-list li:hover { background: #f0f1ff; }
+      #prompt-list li.selected { border-color: var(--accent); background: #f0f1ff; }
+      .pid { color: var(--muted); font-size: 0.85em; }
+      .badge {
+        display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 8px;
+        font-size: 0.75em; background: #eee; color: #555;
+      }
+      .badge.default { background: var(--accent); color: white; }
+      label { display: block; margin: 10px 0 4px; font-weight: 600; }
+      .hint { color: var(--muted); font-size: 0.85em; margin-top: 4px; }
+      #status { margin-top: 10px; min-height: 1.2em; }
+      #status.error { color: var(--danger); }
+      #status.ok { color: var(--ok); }
+      .actions { margin-top: 12px; }
+      @media (max-width: 720px) {
+        #editor-area { grid-template-columns: 1fr; }
+        textarea { min-height: 300px; }
+        input[type='text'], input[type='password'], textarea { font-size: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>回答プロンプトの編集</h1>
+      <p class="sub">
+        チャットで選べる回答プロンプト（人格・話し方）を編集します。保存するとすぐにチャットに反映されます。
+        <a href="/">チャットに戻る</a>
+      </p>
+
+      <section id="login" class="card">
+        <label for="token">管理トークン（ADMIN_TOKEN）</label>
+        <div class="row">
+          <input type="password" id="token" autocomplete="current-password" />
+          <button id="connect">接続</button>
+        </div>
+        <div class="hint">トークンはこのタブの間だけ記憶されます。</div>
+      </section>
+
+      <section id="editor-area" hidden>
+        <aside class="card">
+          <div class="row" style="justify-content: space-between">
+            <strong>プロンプト一覧</strong>
+            <button id="new-prompt" class="secondary">＋ 新規</button>
+          </div>
+          <ul id="prompt-list"></ul>
+          <div class="hint" id="store-path"></div>
+        </aside>
+
+        <section class="card">
+          <label for="prompt-id">ID（英小文字・数字・- _、最大40文字）</label>
+          <input type="text" id="prompt-id" maxlength="40" />
+          <label for="prompt-title">チャットに表示する名前（最大60文字）</label>
+          <input type="text" id="prompt-title" maxlength="60" />
+          <label for="prompt-text">プロンプト本文</label>
+          <textarea id="prompt-text" spellcheck="false"></textarea>
+          <div class="hint">回答の言語（「- Answer in Japanese」など）は自動で末尾に付きます。</div>
+          <div class="hint" id="builtin-note" hidden>
+            標準のプロンプトは編集・削除できません。変えたい場合は「コピーして新規作成」で編集用のコピーを作ってください。
+          </div>
+
+          <div class="row actions">
+            <button id="save">保存</button>
+            <button id="copy" class="secondary">コピーして新規作成</button>
+            <button id="make-default" class="secondary">既定にする</button>
+            <button id="delete" class="danger">削除</button>
+          </div>
+          <div id="status" role="status"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/admin_prompts.js') }}"></script>
+  </body>
+</html>

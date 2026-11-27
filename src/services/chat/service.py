@@ -118,8 +118,12 @@ class ChatService:
         query: str,
         history: Optional[List[Message]] = None,
         max_results: int = DEFAULT_SEARCH_LIMIT,
+        system_prompt: Optional[str] = None,
     ) -> ChatResponse:
         """Answer `query`, continuing `history` if it is a follow-up.
+
+        `system_prompt` is the chosen answer prompt (see PromptStore); the
+        generator's default if not given.
 
         Never raises: a failure becomes an error-message answer with
         `error=True`, which callers don't save to the session.
@@ -147,6 +151,7 @@ class ChatService:
                 search_results,
                 history if analysis.is_follow_up else [],
                 answer_in_english,
+                system_prompt=system_prompt,
             )
         except Exception:
             logger.exception("Error generating the answer")

@@ -6,9 +6,11 @@ class ChatInterface {
     this.messageInput = document.getElementById('messageInput');
     this.sendButton = document.getElementById('sendButton');
     this.sourcesContent = document.getElementById('sourcesContent');
+    this.promptSelect = document.getElementById('promptSelect');
 
     this.initializeEventListeners();
     this.initializeSocketHandlers();
+    this.loadPrompts();
 
     // Focus input on load
     this.messageInput.focus();
@@ -30,6 +32,54 @@ class ChatInterface {
     this.messageInput.addEventListener('input', () => {
       this.sendButton.disabled = !this.messageInput.value.trim();
     });
+
+    // Remember the chosen answer prompt in this browser
+    this.promptSelect.addEventListener('change', () => {
+      this.storeSet('chat.promptId', this.promptSelect.value);
+    });
+  }
+
+  // Fill the answer-prompt selector from the server. On failure it stays
+  // hidden and messages go without prompt_id (the server's default is used).
+  async loadPrompts() {
+    try {
+      const response = await fetch('/api/prompts');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { prompts, default: defaultId } = await response.json();
+
+      this.promptSelect.replaceChildren(
+        ...prompts.map(p => {
+          const option = document.createElement('option');
+          option.value = p.id;
+          option.textContent = p.title;
+          return option;
+        })
+      );
+      const saved = this.storeGet('chat.promptId');
+      const known = id => prompts.some(p => p.id === id);
+      this.promptSelect.value = known(saved) ? saved : defaultId;
+      this.promptSelect.hidden = prompts.length === 0;
+    } catch (error) {
+      console.warn('Could not load prompts; using the server default:', error);
+      this.promptSelect.hidden = true;
+    }
+  }
+
+  // localStorage can be unavailable (private mode, blocked storage)
+  storeGet(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  storeSet(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      /* not remembered; the selection still applies to this page */
+    }
   }
 
   initializeSocketHandlers() {
@@ -198,10 +248,14 @@ class ChatInterface {
     this.setLoadingState(true);
 
     // Send to server
-    this.socket.emit('chat_message', {
+    const payload = {
       query: message,
       timestamp: new Date().toISOString(),
-    });
+    };
+    if (!this.promptSelect.hidden && this.promptSelect.value) {
+      payload.prompt_id = this.promptSelect.value;
+    }
+    this.socket.emit('chat_message', payload);
   }
 
   setLoadingState(loading) {

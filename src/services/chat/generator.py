@@ -72,14 +72,18 @@ class AnswerGenerator:
         search_results: List[SearchResult],
         history: List[Message],
         answer_in_english: bool,
+        system_prompt: Optional[str] = None,
     ) -> GeneratedAnswer:
         """Answer `query` from `search_results`, continuing `history`.
+
+        `system_prompt` is the chosen answer prompt (persona and style);
+        ANSWER_SYSTEM_PROMPT if not given. The answer language is appended.
 
         Raises whatever the LLM or the translation raises, and ValueError if
         the model returns no answer (e.g. a refusal).
         """
         language = "English" if answer_in_english else "Japanese"
-        system_prompt = f"{ANSWER_SYSTEM_PROMPT}\n- Answer in {language}"
+        system_prompt = f"{system_prompt or ANSWER_SYSTEM_PROMPT}\n- Answer in {language}"
         user_prompt = ANSWER_USER_PROMPT.format(
             query=query, context=format_context(search_results)
         )
