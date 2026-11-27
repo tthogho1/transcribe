@@ -7,11 +7,13 @@ Socket.IO ("chat_message"), and keeps each user's conversation in a session.
 Run with `python api/chat_server.py` (from src/), or via run_chat_server.py.
 """
 
+import hmac
 import logging
 import os
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
 from typing import Dict, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -22,6 +24,7 @@ from werkzeug.exceptions import HTTPException
 
 from api.auth import UserTokens
 from models.conversation_chunk import SearchResult
+from services.chat.prompt_store import Prompt, PromptStore, default_prompt_id, default_store_dir
 from services.chat.service import DEFAULT_SEARCH_LIMIT, ChatResponse, ChatService
 from services.session.session_manager import SessionManager
 
@@ -50,11 +53,17 @@ class Services:
     chat: ChatService
     sessions: SessionManager
     tokens: UserTokens
+    # Answer prompts users choose from. None: built in create_app() from
+    # PROMPT_STORE_DIR / ANSWER_PROMPT.
+    prompts: Optional[PromptStore] = None
+    # Password for the prompt editor (/admin/prompts). None disables editing.
+    admin_token: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "Services":
         # ChatService connects to Zilliz and loads the embedding model.
-        return cls(ChatService(), SessionManager(), UserTokens.from_env())
+        return cls(ChatService(), SessionManager(), UserTokens.from_env(),
+                   admin_token=os.getenv("ADMIN_TOKEN") or None)
 
 
 def services() -> Services:
@@ -64,7 +73,14 @@ def services() -> Services:
 def create_app(app_services: Optional[Services] = None) -> Tuple[Flask, SocketIO]:
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
     app.json.ensure_ascii = False  # keep Japanese readable in JSON responses
-    app.extensions["chat_server"] = app_services or Services.from_env()
+    app_services = app_services or Services.from_env()
+    if app_services.prompts is None:
+        provider = app_services.chat.llm_info["provider"]
+        app_services.prompts = PromptStore(default_store_dir(), default_prompt_id(provider))
+    logger.info(f"Prompt store: {app_services.prompts.directory} (default: {app_services.prompts.default_id})")
+    if not app_services.admin_token:
+        logger.info("Prompt editor disabled: set ADMIN_TOKEN to enable /admin/prompts")
+    app.extensions["chat_server"] = app_services
     CORS(app)
     app.register_blueprint(bp)
 
@@ -81,14 +97,19 @@ def create_app(app_services: Optional[Services] = None) -> Tuple[Flask, SocketIO
 # ---------------------------------------------------------------------------
 
 
-def run_chat_turn(session_id: str, query: str) -> ChatResponse:
-    """Answer `query` in `session_id`'s conversation and save the exchange.
+def run_chat_turn(
+    session_id: str, query: str, prompt_id: Optional[str] = None
+) -> Tuple[ChatResponse, Prompt]:
+    """Answer `query` in `session_id`'s conversation with the chosen answer
+    prompt (the default if `prompt_id` is missing or unknown), and save the
+    exchange. Returns the response and the prompt actually used.
 
     Error replies are not saved: they would become "context" for the next turn.
     """
+    prompt = services().prompts.resolve(prompt_id)
     sessions = services().sessions
     history = sessions.get_history_for_openai(session_id)
-    response = services().chat.process_chat_query(query, history)
+    response = services().chat.process_chat_query(query, history, system_prompt=prompt.text)
     if not response.error:
         # Count each message's own size. response.tokens_used covers the whole
         # call (incl. RAG context); storing it makes the session trimmer drop
@@ -97,7 +118,7 @@ def run_chat_turn(session_id: str, query: str) -> ChatResponse:
         sessions.add_message(
             session_id, "assistant", response.answer, tokens=len(response.answer) // 4
         )
-    return response
+    return response, prompt
 
 
 def source_to_dict(result: SearchResult) -> Dict:
@@ -110,7 +131,7 @@ def source_to_dict(result: SearchResult) -> Dict:
     }
 
 
-def chat_response_to_dict(response: ChatResponse) -> Dict:
+def chat_response_to_dict(response: ChatResponse, prompt: Prompt) -> Dict:
     return {
         "answer": response.answer,
         "sources": [source_to_dict(s) for s in response.sources],
@@ -119,6 +140,7 @@ def chat_response_to_dict(response: ChatResponse) -> Dict:
         "tokens_used": response.tokens_used,
         "file_names": response.file_names,
         "related_videos": response.related_videos,
+        "prompt_id": prompt.id,
     }
 
 
@@ -194,8 +216,8 @@ def api_chat():
         user_token, session_id = services().tokens.issue()
 
     logger.info(f"API /api/chat received query from {session_id}: {query}")
-    response = run_chat_turn(session_id, query)
-    return jsonify({**chat_response_to_dict(response), "user_id": user_token})
+    response, prompt = run_chat_turn(session_id, query, data.get("prompt_id"))
+    return jsonify({**chat_response_to_dict(response, prompt), "user_id": user_token})
 
 
 @bp.post("/api/search")
@@ -247,6 +269,98 @@ def api_session_stats():
     return jsonify(services().sessions.get_stats())
 
 
+# --- Answer prompts: anyone can list and choose; editing needs ADMIN_TOKEN ---
+
+
+@bp.get("/api/prompts")
+def api_list_prompts():
+    """Prompts for the chat screen's selector (titles only, not the text)."""
+    store = services().prompts
+    return jsonify({
+        "prompts": [{"id": p.id, "title": p.title} for p in store.list()],
+        "default": store.default_id,
+    })
+
+
+def require_admin(view):
+    """Allow the request only with `Authorization: Bearer <ADMIN_TOKEN>`."""
+
+    @wraps(view)
+    def guarded(*args, **kwargs):
+        expected = services().admin_token
+        if not expected:
+            raise ApiError(403, "Prompt editing is disabled: set ADMIN_TOKEN on the server")
+        header = request.headers.get("Authorization", "")
+        given = header[len("Bearer "):] if header.startswith("Bearer ") else ""
+        if not hmac.compare_digest(given.encode(), expected.encode()):
+            raise ApiError(401, "Invalid admin token")
+        return view(*args, **kwargs)
+
+    return guarded
+
+
+def prompt_to_admin_dict(prompt: Prompt) -> Dict:
+    return {
+        "id": prompt.id,
+        "title": prompt.title,
+        "text": prompt.text,
+        "builtin": prompt.builtin,  # read-only
+    }
+
+
+@bp.get("/admin/prompts")
+def admin_prompts_page():
+    return render_template("admin_prompts.html")
+
+
+@bp.get("/api/admin/prompts")
+@require_admin
+def api_admin_list_prompts():
+    store = services().prompts
+    return jsonify({
+        "prompts": [prompt_to_admin_dict(p) for p in store.list()],
+        "default": store.default_id,
+        "store": str(store.directory),
+    })
+
+
+@bp.put("/api/admin/prompts/<prompt_id>")
+@require_admin
+def api_admin_save_prompt(prompt_id: str):
+    """Create or replace an admin prompt (built-ins are read-only)."""
+    data = json_body()
+    existing = services().prompts.get(prompt_id)
+    if existing and existing.builtin:
+        raise ApiError(403, "Built-in prompts can't be edited; save your version under a new id")
+    try:
+        prompt = services().prompts.save(prompt_id, data.get("title"), data.get("text"))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    return jsonify(prompt_to_admin_dict(prompt))
+
+
+@bp.delete("/api/admin/prompts/<prompt_id>")
+@require_admin
+def api_admin_delete_prompt(prompt_id: str):
+    """Delete an admin prompt (built-ins can't be deleted)."""
+    try:
+        services().prompts.delete(prompt_id)
+    except KeyError:
+        raise ApiError(404, "No deletable prompt with that id (built-ins can't be deleted)")
+    return jsonify({"status": "deleted", "default": services().prompts.default_id})
+
+
+@bp.put("/api/admin/default-prompt")
+@require_admin
+def api_admin_set_default_prompt():
+    prompt_id = json_body().get("id")
+    try:
+        services().prompts.set_default(prompt_id)
+    except KeyError:
+        raise ApiError(404, "No prompt with that id")
+    return jsonify({"default": prompt_id})
+
+
 @bp.get("/health")
 def health_check():
     session_stats = services().sessions.get_stats()
@@ -255,7 +369,7 @@ def health_check():
         "timestamp": datetime.now().isoformat(),
         "services": {
             "zilliz": "connected" if services().chat.is_search_connected else "disconnected",
-            "openai": "configured" if os.getenv("OPENAI_API_KEY") else "not configured",
+            "llm": services().chat.llm_info,
             "session_storage": session_stats.get("storage_type", "unknown"),
             "active_sessions": session_stats.get("active_sessions", 0),
         },
@@ -287,12 +401,12 @@ def handle_chat_message(data):
     session_id = request.sid
     logger.info(f"Processing chat query from {session_id}: {query}")
     try:
-        response = run_chat_turn(session_id, query)
+        response, prompt = run_chat_turn(session_id, query, data.get("prompt_id"))
     except Exception:
         logger.exception("WebSocket chat error")
         emit("chat_error", {"error": "Internal server error"})
         return
-    emit("chat_response", chat_response_to_dict(response))
+    emit("chat_response", chat_response_to_dict(response, prompt))
 
 
 # Module-level app: `python api/chat_server.py` and run_chat_server.py

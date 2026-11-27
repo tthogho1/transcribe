@@ -38,6 +38,8 @@
 
           <div class="input-area">
             <div class="input-group">
+              <!-- Answer prompt; options come from /api/prompts (chat.js) -->
+              <select id="promptSelect" aria-label="回答プロンプト" title="回答プロンプト" hidden></select>
               <input type="text" id="messageInput" placeholder="質問を入力してください..." />
               <button id="sendButton">Send</button>
             </div>

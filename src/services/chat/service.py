@@ -5,7 +5,8 @@ ChatService: answer a question over past conversations.
   2. a small LLM decides whether it continues the conversation and, if so,
      rewrites it as a standalone search query,
   3. Zilliz hybrid search finds relevant transcript passages,
-  4. OpenAI answers from those passages (and the history, for follow-ups).
+  4. the chat LLM (OpenAI or Ollama) answers from those passages (and the
+     history, for follow-ups).
 
 Saving the exchange to the session is the caller's job (api.chat_server).
 """
@@ -22,9 +23,10 @@ from deep_translator import GoogleTranslator
 
 from core.conversation_vectorizer import ConversationVectorizer
 from models.conversation_chunk import SearchResult
-from services.chat.generator import AnswerGenerator, Message
+from services.chat.generator import AnswerGenerator
 from services.chat.language import is_japanese_query
 from services.chat.prompts import REWRITE_SYSTEM_PROMPT
+from services.llm import LLMClient, Message, create_llm_clients
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +81,27 @@ class ChatService:
         vectorizer: Optional[ConversationVectorizer] = None,
         generator: Optional[AnswerGenerator] = None,
         translator: Optional[GoogleTranslator] = None,
+        rewrite_llm: Optional[LLMClient] = None,
     ):
         self.vectorizer = vectorizer or ConversationVectorizer(
             os.getenv("ZILLIZ_URI"), os.getenv("ZILLIZ_TOKEN")
         )
-        self.generator = generator or AnswerGenerator()
+        if generator is None or rewrite_llm is None:
+            default_answer_llm, default_rewrite_llm = create_llm_clients()
+        self.generator = generator or AnswerGenerator(default_answer_llm)
         # Small, fast model for the follow-up check / query rewrite that runs
-        # before every search; the answer itself uses OPENAI_MODEL.
-        self.rewrite_model = os.getenv("OPENAI_REWRITE_MODEL", "gpt-4.1-mini")
+        # before every search; the answer itself uses the generator's model.
+        self.rewrite_llm = rewrite_llm or default_rewrite_llm
         self.translator = translator or GoogleTranslator(source="auto", target="ja")
+
+    @property
+    def llm_info(self) -> Dict[str, str]:
+        """Which LLMs answer and run the follow-up check (for /health)."""
+        return {
+            "provider": self.generator.llm.provider,
+            "model": self.generator.llm.model,
+            "rewrite_model": self.rewrite_llm.model,
+        }
 
     @property
     def is_search_connected(self) -> bool:
@@ -104,8 +118,12 @@ class ChatService:
         query: str,
         history: Optional[List[Message]] = None,
         max_results: int = DEFAULT_SEARCH_LIMIT,
+        system_prompt: Optional[str] = None,
     ) -> ChatResponse:
         """Answer `query`, continuing `history` if it is a follow-up.
+
+        `system_prompt` is the chosen answer prompt (see PromptStore); the
+        generator's default if not given.
 
         Never raises: a failure becomes an error-message answer with
         `error=True`, which callers don't save to the session.
@@ -133,9 +151,10 @@ class ChatService:
                 search_results,
                 history if analysis.is_follow_up else [],
                 answer_in_english,
+                system_prompt=system_prompt,
             )
         except Exception:
-            logger.exception("Error generating OpenAI response")
+            logger.exception("Error generating the answer")
             return self._error_response(
                 query, answer_in_english, GENERATION_ERROR_MESSAGE, search_results
             )
@@ -160,17 +179,16 @@ class ChatService:
             for m in conversation[-REWRITE_HISTORY_MESSAGES:]
         )
         try:
-            response = self.generator.client.chat.completions.create(
-                model=self.rewrite_model,
-                messages=[
+            reply = self.rewrite_llm.chat(
+                [
                     {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
                     {"role": "user", "content": f"Conversation:\n{history_text}\n\nNew question: {query}"},
                 ],
-                response_format={"type": "json_object"},
-                temperature=0,
                 max_tokens=200,
+                temperature=0,
+                json_mode=True,
             )
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(reply.text)
             is_follow_up = result.get("is_follow_up")
             standalone = result.get("standalone_query")
             if not isinstance(is_follow_up, bool):

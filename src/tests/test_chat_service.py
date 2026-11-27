@@ -15,6 +15,7 @@ import services.chat.generator as generator_module
 from models.conversation_chunk import SearchResult
 from services.chat.generator import AnswerGenerator, GeneratedAnswer, trim_history
 from services.chat.service import ChatService, QueryAnalysis
+from services.llm.openai_client import OpenAIChatClient
 
 
 def _result(file_name="abc123.json", text="駅そばの話", title="Video"):
@@ -72,7 +73,8 @@ def make_service():
         openai = openai or FakeOpenAI(answers=["答え"])
         return ChatService(
             vectorizer=vectorizer,
-            generator=AnswerGenerator(client=openai),
+            generator=AnswerGenerator(OpenAIChatClient("answer-model", openai)),
+            rewrite_llm=OpenAIChatClient("rewrite-model", openai),
             translator=SimpleNamespace(translate=translate),
         )
     return make
@@ -167,7 +169,7 @@ def test_empty_openai_answer_becomes_error_message(make_service, content):
 
 
 def test_empty_answer_raises_in_the_generator():
-    generator = AnswerGenerator(client=FakeOpenAI(answers=[None]))
+    generator = AnswerGenerator(OpenAIChatClient("answer-model", FakeOpenAI(answers=[None])))
     with pytest.raises(ValueError):
         generator.generate("質問", [_result()], [], answer_in_english=False)
 
@@ -197,7 +199,7 @@ def test_context_too_long_retries_with_shorter_history():
     long_history = [{"role": r, "content": "あ" * 1000} for r in ["user", "assistant"] * 8]
     openai = FakeOpenAI(answers=[RuntimeError("This model's maximum context length is 8192"), "再試行"])
 
-    answer = AnswerGenerator(client=openai).generate("質問", [_result()], long_history, False)
+    answer = AnswerGenerator(OpenAIChatClient("answer-model", openai)).generate("質問", [_result()], long_history, False)
 
     assert answer.text == "再試行"
     first, retry = openai.answer_calls()
@@ -207,12 +209,12 @@ def test_context_too_long_retries_with_shorter_history():
 def test_other_openai_errors_are_not_retried():
     openai = FakeOpenAI(answers=[RuntimeError("rate limited"), "unused"])
     with pytest.raises(RuntimeError, match="rate limited"):
-        AnswerGenerator(client=openai).generate("質問", [_result()], [], False)
+        AnswerGenerator(OpenAIChatClient("answer-model", openai)).generate("質問", [_result()], [], False)
     assert len(openai.answer_calls()) == 1
 
 
 def test_answer_reports_total_tokens():
-    answer = AnswerGenerator(client=FakeOpenAI(answers=["答え"])).generate("質問", [], [], False)
+    answer = AnswerGenerator(OpenAIChatClient("answer-model", FakeOpenAI(answers=["答え"]))).generate("質問", [], [], False)
     assert answer == GeneratedAnswer("答え", 5000)
 
 

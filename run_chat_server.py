@@ -87,7 +87,6 @@ def check_requirements():
         "openai",
         "pymilvus",
         "sentence_transformers",
-        "cohere",
         "langdetect",
         "deep_translator",
     ]
@@ -145,7 +144,11 @@ def main():
         logger.info(f"   Project Root: {project_root}")
 
         # Check environment variables
-        required_env_vars = ["ZILLIZ_URI", "ZILLIZ_TOKEN", "OPENAI_API_KEY"]
+        # The OpenAI key is only needed when OpenAI is the LLM provider.
+        llm_provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+        required_env_vars = ["ZILLIZ_URI", "ZILLIZ_TOKEN"]
+        if llm_provider == "openai":
+            required_env_vars.append("OPENAI_API_KEY")
         missing_env_vars = []
 
         for var in required_env_vars:
@@ -164,10 +167,11 @@ def main():
             logger.info("✅ All required environment variables are set")
 
         # Check optional environment variables
+        logger.info(f"🧠 LLM provider: {llm_provider} (LLM_PROVIDER)")
+        model_var = "OLLAMA_MODEL" if llm_provider == "ollama" else "OPENAI_MODEL"
         optional_env_vars = {
-            "COHERE_API_KEY": "Cohere reranking",
-            "RERANK_METHOD": "Reranking method (cohere/cross_encoder)",
-            "OPENAI_MODEL": "OpenAI model selection",
+            model_var: "Answer model",
+            "RERANKER_MODEL": "Search reranker",
         }
 
         for var, description in optional_env_vars.items():
