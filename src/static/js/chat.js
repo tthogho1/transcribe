@@ -7,6 +7,7 @@ class ChatInterface {
     this.sendButton = document.getElementById('sendButton');
     this.sourcesContent = document.getElementById('sourcesContent');
     this.promptSelect = document.getElementById('promptSelect');
+    this.sampleButtons = document.querySelectorAll('.sample-question');
 
     this.initializeEventListeners();
     this.initializeSocketHandlers();
@@ -31,6 +32,15 @@ class ChatInterface {
     // Input validation
     this.messageInput.addEventListener('input', () => {
       this.sendButton.disabled = !this.messageInput.value.trim();
+    });
+
+    // Sample questions: put the text in the input and send it
+    this.sampleButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        if (this.sendButton.classList.contains('loading')) return;
+        this.messageInput.value = button.textContent.trim();
+        this.sendMessage();
+      });
     });
 
     // Remember the chosen answer prompt in this browser
@@ -262,6 +272,7 @@ class ChatInterface {
     this.sendButton.disabled = loading;
     this.sendButton.textContent = loading ? 'Thinking...' : 'Send';
     this.messageInput.disabled = loading;
+    this.sampleButtons.forEach(button => (button.disabled = loading));
 
     if (loading) {
       this.sendButton.classList.add('loading');
