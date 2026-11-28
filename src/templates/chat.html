@@ -37,6 +37,13 @@
           </div>
 
           <div class="input-area">
+            <!-- Clicking a sample question sends it as is (chat.js) -->
+            <div class="sample-questions" aria-label="質問の例">
+              <span class="sample-label">質問の例:</span>
+              <button type="button" class="sample-question">会社の休み方を教えて下さい</button>
+              <button type="button" class="sample-question">上司に殴られた時はどのように対応しますか？</button>
+              <button type="button" class="sample-question">銀行の仕事内容について教えて下さい。</button>
+            </div>
             <div class="input-group">
               <!-- Answer prompt; options come from /api/prompts (chat.js) -->
               <select id="promptSelect" aria-label="回答プロンプト" title="回答プロンプト" hidden></select>

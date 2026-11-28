@@ -114,6 +114,40 @@ body {
   background: white;
 }
 
+/* Sample questions above the input; clicking one sends it */
+.sample-questions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sample-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.sample-question {
+  padding: 4px 12px;
+  border: 1px solid #c5cae9;
+  border-radius: 14px;
+  background: #f5f6ff;
+  color: #3f51b5;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.sample-question:hover:not(:disabled) {
+  background: #e8eaf6;
+}
+
+.sample-question:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .input-group {
   display: flex;
   gap: 10px;
